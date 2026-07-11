@@ -206,3 +206,4 @@ The whisper model file must be downloaded before first use. See [Whisper Model S
 Apache-2.0. See [LICENSE](LICENSE) for details.
 
 Copyright 2026 [Decibri](https://decibri.com)
+
