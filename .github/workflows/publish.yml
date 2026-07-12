@@ -72,18 +72,37 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          # Node 22 (current LTS), not 20. npm 12 requires Node 22, 24, or 26,
+          # so `npm install -g npm@latest` on Node 20 now fails outright at the
+          # toolchain step. Pinning npm to 11.x instead would work, but leaves
+          # this workflow on an ageing Node line.
+          node-version: '22'
           # Trusted publishing does not remove the need for this: it writes
           # the .npmrc that points npm at the registry. Only the token goes.
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for trusted publishing
-        # The npm bundled with Node 20 is 10.x; OIDC trusted publishing
-        # requires npm >= 11.5.1. Without this upgrade the publish falls
-        # back to token auth, finds no token, and fails.
+        # OIDC trusted publishing requires npm >= 11.5.1. Without this upgrade
+        # the publish falls back to token auth, finds no token, and fails.
+        # The assertion exists because a silent no-op here is the most
+        # expensive failure mode: it surfaces at the publish step as an auth
+        # error that looks nothing like a toolchain problem.
+        shell: bash
         run: |
           npm install -g npm@latest
-          npm --version
+          NPM_VERSION=$(npm --version)
+          echo "npm ${NPM_VERSION}"
+          MAJOR=$(echo "$NPM_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$NPM_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$NPM_VERSION" | cut -d. -f3)
+          if [ "$MAJOR" -lt 11 ] \
+            || { [ "$MAJOR" -eq 11 ] && [ "$MINOR" -lt 5 ]; } \
+            || { [ "$MAJOR" -eq 11 ] && [ "$MINOR" -eq 5 ] && [ "$PATCH" -lt 1 ]; }; then
+            echo "ERROR: npm ${NPM_VERSION} does not support OIDC trusted publishing (need >= 11.5.1)"
+            echo "The npm upgrade step did not take effect. Check the Node version against npm's engine floor."
+            exit 1
+          fi
+          echo "OK: npm ${NPM_VERSION} supports trusted publishing"
 
       - name: Install ALSA runtime (Linux)
         # decibri's native addon links ALSA on Linux. Harmless today at decibri
@@ -175,18 +194,37 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          # Node 22 (current LTS), not 20. npm 12 requires Node 22, 24, or 26,
+          # so `npm install -g npm@latest` on Node 20 now fails outright at the
+          # toolchain step. Pinning npm to 11.x instead would work, but leaves
+          # this workflow on an ageing Node line.
+          node-version: '22'
           # Trusted publishing does not remove the need for this: it writes
           # the .npmrc that points npm at the registry. Only the token goes.
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for trusted publishing
-        # The npm bundled with Node 20 is 10.x; OIDC trusted publishing
-        # requires npm >= 11.5.1. Without this upgrade the publish falls
-        # back to token auth, finds no token, and fails.
+        # OIDC trusted publishing requires npm >= 11.5.1. Without this upgrade
+        # the publish falls back to token auth, finds no token, and fails.
+        # The assertion exists because a silent no-op here is the most
+        # expensive failure mode: it surfaces at the publish step as an auth
+        # error that looks nothing like a toolchain problem.
+        shell: bash
         run: |
           npm install -g npm@latest
-          npm --version
+          NPM_VERSION=$(npm --version)
+          echo "npm ${NPM_VERSION}"
+          MAJOR=$(echo "$NPM_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$NPM_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$NPM_VERSION" | cut -d. -f3)
+          if [ "$MAJOR" -lt 11 ] \
+            || { [ "$MAJOR" -eq 11 ] && [ "$MINOR" -lt 5 ]; } \
+            || { [ "$MAJOR" -eq 11 ] && [ "$MINOR" -eq 5 ] && [ "$PATCH" -lt 1 ]; }; then
+            echo "ERROR: npm ${NPM_VERSION} does not support OIDC trusted publishing (need >= 11.5.1)"
+            echo "The npm upgrade step did not take effect. Check the Node version against npm's engine floor."
+            exit 1
+          fi
+          echo "OK: npm ${NPM_VERSION} supports trusted publishing"
 
       # npm Trusted Publishing (OIDC) supplies auth automatically given
       # `id-token: write` and the registered trusted publisher record. No
