@@ -120,15 +120,43 @@ jobs:
         # Defense-in-depth: verify npm package contents before any publish.
         # Runs in both publish and dry-run modes. The forbidden patterns exist
         # because the maintainer working tree holds gitignored registry
-        # credentials (.mcpregistry_*) and a publisher binary
-        # (mcp-publisher.exe); this gate stops them ever reaching a tarball if
-        # .gitignore or the package.json `files` list slips.
+        # credentials (.mcpregistry_*), a publisher binary (mcp-publisher.exe),
+        # and a local runbook (CLAUDE.local.md); this gate stops them ever
+        # reaching a tarball if .gitignore or the package.json `files` list
+        # slips.
+        #
+        # The shape check is not paranoia. npm 10 emitted an array of packed-
+        # package records from `npm pack --dry-run --json`; npm 12 emits an
+        # object keyed by package name (verified against real npm 12.0.1
+        # output, which this step prints to the run log). A bare record object
+        # is also accepted as a middle ground. Hard-coding any one shape breaks
+        # on the next npm major, so accept the known shapes and fail loudly if
+        # none yields a file list. A gate that checks a file list must never
+        # pass because the file list came back empty.
         shell: bash
         run: |
           set -o pipefail
           FAIL=0
 
-          files=$(npm pack --dry-run --json | jq -r '.[0].files[].path')
+          PACK_JSON=$(npm pack --dry-run --json)
+          echo "Raw npm pack output:"
+          echo "$PACK_JSON"
+          echo ""
+
+          files=$(echo "$PACK_JSON" | jq -r '
+            if type == "array" then .[0]
+            elif has("files") then .
+            else first(.[] | objects | select(has("files")))
+            end
+            | .files[].path')
+
+          if [ -z "$files" ]; then
+            echo "ERROR: could not extract a file list from 'npm pack --dry-run --json'."
+            echo "The output schema has probably changed again. Raw output is above."
+            echo "This gate must never pass on an empty file list."
+            exit 1
+          fi
+
           echo "Would pack:"
           echo "$files" | sort | sed 's/^/  * /'
           echo ""
@@ -152,7 +180,7 @@ jobs:
             fi
           done
 
-          for p in '\.mcpregistry' 'mcp-publisher' '\.exe$' '^test/' '\.claude'
+          for p in '\.mcpregistry' 'mcp-publisher' '\.exe$' '^test/' '\.claude' 'CLAUDE\.local'
           do
             matches=$(echo "$files" | grep -E "$p" || true)
             if [ -n "$matches" ]; then
