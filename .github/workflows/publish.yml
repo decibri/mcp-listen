@@ -1,46 +1,219 @@
-name: Publish
+name: Publish to npm
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+        description: 'Tick to actually publish. Unticked = dry run (install, test, verify-pack only; no publish).'
 
 permissions:
+  # `contents: write` permits the `gh release create` step.
+  # `id-token: write` is required for npm Trusted Publisher OIDC token
+  # issuance.
   contents: write
+  id-token: write
 
 jobs:
-  publish:
+  preflight:
+    name: Preflight (version match)
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run mode
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" != "true" ]; then
+            echo "::notice::DRY RUN MODE (workflow_dispatch with publish=false). No publish will occur."
+          else
+            echo "Publishing run. Trigger: ${{ github.event_name }}. Tag: ${{ github.ref_name }}"
+          fi
+
+      - name: Assert tag version matches package.json
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          # Tag form: refs/tags/v0.2.0 -> TAG_VERSION=0.2.0
+          # Pre-release tags (v0.2.0-rc.1) are allowed; the suffix is
+          # preserved and must match the manifest if used.
+          TAG_VERSION="${{ github.ref_name }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          echo "Tag version: ${TAG_VERSION}"
+
+          # jq is preinstalled on ubuntu-latest runners; no setup needed.
+          PKG_VERSION=$(jq -r .version package.json)
+          echo "package.json: ${PKG_VERSION}"
+
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "ERROR: tag v${TAG_VERSION} does not match package.json version ${PKG_VERSION}"
+            echo ""
+            echo "Release aborted: version mismatch detected."
+            echo "Bump package.json (and package-lock.json and server.json) to ${TAG_VERSION}, then re-tag."
+            exit 1
+          fi
+
+          echo "OK: tag and package.json agree on ${TAG_VERSION}"
+
+  # Everything that is not the publish itself lives here, outside the `npm`
+  # environment, so a workflow_dispatch dry run can execute the full
+  # install / test / pack-verification path without tripping the
+  # environment's `v*` tag restriction.
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    needs: preflight
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
+          # Trusted publishing does not remove the need for this: it writes
+          # the .npmrc that points npm at the registry. Only the token goes.
           registry-url: 'https://registry.npmjs.org'
 
-      - run: npm install --ignore-scripts
-
-      - run: npm test
-
-      - name: Verify tag matches package.json version
+      - name: Upgrade npm for trusted publishing
+        # The npm bundled with Node 20 is 10.x; OIDC trusted publishing
+        # requires npm >= 11.5.1. Without this upgrade the publish falls
+        # back to token auth, finds no token, and fails.
         run: |
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          TAG="${GITHUB_REF_NAME}"
-          if [ "$PKG_VERSION" != "$TAG" ]; then
-            echo "::error::Tag $TAG does not match package.json version $PKG_VERSION"
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install ALSA runtime (Linux)
+        # decibri's native addon links ALSA on Linux. Harmless today at decibri
+        # 1.x; required once decibri 5.x lands. Mirrors the platform setup in the
+        # decibri repo's own build matrix.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run smoke tests
+        run: npm test
+
+      - name: Verify npm package contents (pre-publish gate)
+        # Defense-in-depth: verify npm package contents before any publish.
+        # Runs in both publish and dry-run modes. The forbidden patterns exist
+        # because the maintainer working tree holds gitignored registry
+        # credentials (.mcpregistry_*) and a publisher binary
+        # (mcp-publisher.exe); this gate stops them ever reaching a tarball if
+        # .gitignore or the package.json `files` list slips.
+        shell: bash
+        run: |
+          set -o pipefail
+          FAIL=0
+
+          files=$(npm pack --dry-run --json | jq -r '.[0].files[].path')
+          echo "Would pack:"
+          echo "$files" | sort | sed 's/^/  * /'
+          echo ""
+
+          for f in \
+            package.json \
+            index.js \
+            lib/audio.js \
+            lib/llm.js \
+            lib/transcribe.js \
+            lib/wav.js \
+            README.md \
+            LICENSE \
+            ATTRIBUTION.md
+          do
+            if echo "$files" | grep -Fxq "$f"; then
+              echo "  [OK]   required present: $f"
+            else
+              echo "  [FAIL] required MISSING: $f"
+              FAIL=1
+            fi
+          done
+
+          for p in '\.mcpregistry' 'mcp-publisher' '\.exe$' '^test/' '\.claude'
+          do
+            matches=$(echo "$files" | grep -E "$p" || true)
+            if [ -n "$matches" ]; then
+              echo "  [FAIL] forbidden pattern '$p' matched:"
+              echo "$matches" | sed 's/^/         /'
+              FAIL=1
+            else
+              echo "  [OK]   forbidden absent: $p"
+            fi
+          done
+
+          echo ""
+          if [ "$FAIL" -ne 0 ]; then
+            echo "================================================"
+            echo "  VERIFICATION FAILED - not publish-ready"
+            echo "================================================"
             exit 1
           fi
+          echo "Package passes verification."
 
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: [preflight, verify]
+    # Job-level `if` is load-bearing, not cosmetic. The `npm` environment
+    # restricts deployments to `v*` tags. If this job merely skipped the
+    # publish *step* on a dry run, the job would still start, GitHub would
+    # evaluate the environment protection rules against a branch ref, and the
+    # run would fail. A job skipped by a job-level `if` never evaluates its
+    # environment at all.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+    # Required-reviewer protection on this environment gates the publish
+    # behind a manual approval in the Actions UI. The environment's `v*` tag
+    # rule additionally makes publishing from a branch impossible by policy,
+    # not merely by convention.
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          # Trusted publishing does not remove the need for this: it writes
+          # the .npmrc that points npm at the registry. Only the token goes.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for trusted publishing
+        # The npm bundled with Node 20 is 10.x; OIDC trusted publishing
+        # requires npm >= 11.5.1. Without this upgrade the publish falls
+        # back to token auth, finds no token, and fails.
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      # npm Trusted Publishing (OIDC) supplies auth automatically given
+      # `id-token: write` and the registered trusted publisher record. No
+      # NODE_AUTH_TOKEN is used, and no --provenance flag is passed:
+      # provenance is generated automatically from the OIDC token. The
+      # publish is gated on either a tag-push trigger or a
+      # workflow_dispatch run with `publish: true`.
+      - name: Publish mcp-listen
+        run: npm publish --access public
 
       - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
             --title "${{ github.ref_name }}" \
-            --notes "Release ${{ github.ref_name }}" \
-            --repo ${{ github.repository }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            --generate-notes
+
+      - name: Verify npm publish
+        if: github.event_name == 'push'
+        # Strip the `v` prefix from the tag so the `npm view` lookup uses
+        # the registry-side semver, not the literal tag name.
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "Verifying npm registry view for mcp-listen@${VERSION}"
+          sleep 30
+          npm view "mcp-listen@${VERSION}"
