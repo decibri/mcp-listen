@@ -71,6 +71,14 @@ npm install -g mcp-listen
 
 ## Requirements
 
+**Supported platforms:**
+
+- Windows x64
+- macOS Apple silicon (arm64)
+- Linux x64 and arm64 (glibc)
+
+Intel Mac (darwin-x64) is not supported: Apple has discontinued the platform and no decibri binary is published for it.
+
 **For `list_audio_devices` and `capture_audio`:**
 
 - Node.js 18+
@@ -93,10 +101,12 @@ Returns a JSON array of available audio input devices.
 
 ```json
 [
-  { "index": 3, "name": "Microphone (Creative Live! Cam)", "isDefault": true, "maxInputChannels": 2, "defaultSampleRate": 48000 },
-  { "index": 4, "name": "Microphone Array (Intel)", "isDefault": false, "maxInputChannels": 2, "defaultSampleRate": 48000 }
+  { "index": 0, "name": "Microphone", "id": "wasapi:{0.0.1.00000000}.{6b187949-26ea-470b-907d-66bf87261530}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": true },
+  { "index": 1, "name": "Microphone Array", "id": "wasapi:{0.0.1.00000000}.{b7a6e3e2-a62b-4e92-9320-947c4be98552}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": false }
 ]
 ```
+
+The `id` is stable across reboots and device changes. The `index` is positional and can shift when devices are added or removed, and names are not unique. Prefer `id` when selecting a device. In the rare case the host cannot produce a stable id for a device, its `id` is an empty string and it can only be selected by `index`.
 
 ### capture_audio
 
@@ -107,7 +117,7 @@ Records audio from the microphone and saves as a WAV file.
 | Parameter | Type | Default | Description |
 | ---------- | ------ | --------- | ------------- |
 | `duration_ms` | number | 5000 | Recording duration in milliseconds (100-30000) |
-| `device` | number | system default | Device index from `list_audio_devices` |
+| `device` | number or string | system default | Device index or stable device `id` from `list_audio_devices` |
 
 **Example response:**
 
@@ -130,7 +140,7 @@ Full voice pipeline: capture audio, transcribe with whisper.cpp, send to Ollama,
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
 | `duration_ms` | number | 5000 | Recording duration in milliseconds (100-30000) |
-| `device` | number | system default | Device index from `list_audio_devices` |
+| `device` | number or string | system default | Device index or stable device `id` from `list_audio_devices` |
 | `whisper_model` | string | ggml-base.en.bin | Path or filename of Whisper GGML model |
 | `language` | string | en | Language code for transcription |
 | `model` | string | llama3.2 | Ollama model name |

@@ -63,13 +63,13 @@ jobs:
         shell: bash
         run: |
           node -e '
-            const Decibri = require("decibri");
+            const { Microphone } = require("decibri");
             try {
-              const devices = Decibri.devices();
-              console.log("Decibri.devices() returned:");
+              const devices = Microphone.devices();
+              console.log("Microphone.devices() returned:");
               console.log(JSON.stringify(devices, null, 2));
             } catch (err) {
-              console.log("Decibri.devices() threw:");
+              console.log("Microphone.devices() threw:");
               console.log(err && err.stack ? err.stack : String(err));
             }
           '

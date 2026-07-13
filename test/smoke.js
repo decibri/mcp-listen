@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { version } = require('../package.json');
@@ -17,6 +17,34 @@ let msgId = 0;
 function log(status, name) {
   const symbol = status === 'pass' ? '\x1b[32mPASS\x1b[0m' : status === 'fail' ? '\x1b[31mFAIL\x1b[0m' : '\x1b[33mSKIP\x1b[0m';
   console.log(`  ${symbol}  ${name}`);
+}
+
+// Capture 500ms through the server with the given extra arguments and assert
+// the WAV is byte-exact for the tool's fixed output format. Returns the file
+// size. Used by the by-index and by-id device selection tests; the main
+// capture test (test 4) keeps its own full set of header assertions.
+async function captureExact(server, extraArgs) {
+  const DURATION_MS = 500;
+  const SAMPLE_RATE = 16000;
+  const CHANNELS = 1;
+  const BIT_DEPTH = 16;
+  const WAV_HEADER_BYTES = 44;
+  const expectedPcmBytes =
+    Math.round((DURATION_MS * SAMPLE_RATE) / 1000) * CHANNELS * (BIT_DEPTH / 8);
+  const expectedSize = WAV_HEADER_BYTES + expectedPcmBytes;
+
+  const res = await server.send('tools/call', {
+    name: 'capture_audio',
+    arguments: { duration_ms: DURATION_MS, ...extraArgs }
+  });
+  if (res.result.isError) throw new Error(res.result.content[0].text);
+  const data = JSON.parse(res.result.content[0].text);
+  const stat = fs.statSync(data.path);
+  try { fs.unlinkSync(data.path); } catch {}
+  if (stat.size !== expectedSize) {
+    throw new Error(`Expected exactly ${expectedSize} bytes for ${DURATION_MS}ms, got ${stat.size}`);
+  }
+  return stat.size;
 }
 
 function startServer() {
@@ -112,6 +140,7 @@ async function run() {
 
   // Test 3: list_audio_devices returns valid response
   let hasDevices = false;
+  let deviceList = [];
   try {
     const res = await server.send('tools/call', { name: 'list_audio_devices', arguments: {} });
     const text = res.result.content[0].text;
@@ -122,6 +151,7 @@ async function run() {
       log('pass', 'list_audio_devices returns empty (no mic detected)');
     } else if (Array.isArray(parsed)) {
       hasDevices = parsed.length > 0;
+      deviceList = parsed;
       if (hasDevices && typeof parsed[0].name !== 'string') {
         throw new Error('Device object missing name field');
       }
@@ -196,7 +226,76 @@ async function run() {
     skipped++;
   }
 
-  // Test 5: capture_audio rejects invalid device
+  // Test 5: every device carries a string id. The id is the only reliable
+  // selector: indexes are positional and names are not unique (real machines
+  // report two devices both called "Microphone"). The id may be empty when
+  // the host cannot produce one, which is permitted upstream, so this checks
+  // the type rather than the content. The by-id capture test skips on an
+  // empty id.
+  if (hasDevices) {
+    try {
+      for (const d of deviceList) {
+        if (typeof d.id !== 'string') {
+          throw new Error(`Device "${d.name}" (index ${d.index}) has id ${JSON.stringify(d.id)}`);
+        }
+      }
+      log('pass', `every device has a string id (${deviceList.length} checked)`);
+      passed++;
+    } catch (err) {
+      log('fail', `device ids: ${err.message}`);
+      failed++;
+    }
+  } else {
+    log('skip', 'device ids (no microphone available)');
+    skipped++;
+  }
+
+  // Tests 6 and 7: capture_audio addresses the same device by index and by
+  // stable id, and both deliver the exact requested duration. Prefers the
+  // default device; falls back to any device with a non-empty id, since
+  // decibri documents id as empty when the host cannot produce one and such
+  // a device is selectable only by index.
+  if (hasDevices) {
+    const target =
+      deviceList.find((d) => d.isDefault && d.id) ||
+      deviceList.find((d) => d.id) ||
+      deviceList[0];
+
+    try {
+      // Guard the selector type before sending: JSON.stringify drops
+      // undefined-valued properties, so a missing index would silently
+      // capture the default device and false-pass this test.
+      if (typeof target.index !== 'number') {
+        throw new Error(`Device has no numeric index: ${JSON.stringify(target)}`);
+      }
+      const size = await captureExact(server, { device: target.index });
+      log('pass', `capture_audio by index ${target.index} is byte-exact (${size} bytes)`);
+      passed++;
+    } catch (err) {
+      log('fail', `capture_audio by index: ${err.message}`);
+      failed++;
+    }
+
+    if (typeof target.id === 'string' && target.id.length > 0) {
+      try {
+        const size = await captureExact(server, { device: target.id });
+        log('pass', `capture_audio by id is byte-exact (${size} bytes)`);
+        passed++;
+      } catch (err) {
+        log('fail', `capture_audio by id: ${err.message}`);
+        failed++;
+      }
+    } else {
+      log('skip', 'capture_audio by id (no device with a stable id)');
+      skipped++;
+    }
+  } else {
+    log('skip', 'capture_audio by index (no microphone available)');
+    log('skip', 'capture_audio by id (no microphone available)');
+    skipped += 2;
+  }
+
+  // Test 8: capture_audio rejects invalid device
   try {
     const res = await server.send('tools/call', {
       name: 'capture_audio',
@@ -210,7 +309,7 @@ async function run() {
     failed++;
   }
 
-  // Test 6: Unknown tool returns error
+  // Test 9: Unknown tool returns error
   try {
     const res = await server.send('tools/call', {
       name: 'nonexistent_tool',
@@ -221,6 +320,31 @@ async function run() {
     passed++;
   } catch (err) {
     log('fail', `Unknown tool: ${err.message}`);
+    failed++;
+  }
+
+  // Test 10: on a target decibri publishes no binary for, startup fails with
+  // an actionable message, not the native loader's advice to delete the
+  // lockfile and reinstall. Faking platform/arch in a child process walks
+  // the loader's real darwin-x64 path: every load candidate is
+  // MODULE_NOT_FOUND, exactly as on an Intel Mac.
+  try {
+    const probe = spawnSync(process.execPath, ['-e',
+      "Object.defineProperty(process, 'platform', { value: 'darwin' });" +
+      "Object.defineProperty(process, 'arch', { value: 'x64' });" +
+      `require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'audio.js'))});`
+    ], { encoding: 'utf8' });
+    if (probe.status === 0) throw new Error('Expected load failure on simulated darwin-x64');
+    if (!probe.stderr.includes('Intel Mac is not supported')) {
+      throw new Error(`Startup error lacks the platform explanation. stderr: ${probe.stderr.slice(0, 200)}`);
+    }
+    if (!probe.stderr.includes('Supported platforms:')) {
+      throw new Error('Startup error lacks the supported-platform list');
+    }
+    log('pass', 'unsupported platform fails at startup with actionable error');
+    passed++;
+  } catch (err) {
+    log('fail', `unsupported platform error: ${err.message}`);
     failed++;
   }
 

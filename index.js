@@ -23,7 +23,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'list_audio_devices',
-      description: 'List available audio input devices (microphones) on this machine.',
+      description: 'List available audio input devices (microphones) on this machine. Each device has a numeric index, a human-readable name, and a stable id. Prefer the id when selecting a device: indexes can shift when devices are added or removed, and names are not unique.',
       inputSchema: { type: 'object', properties: {} }
     },
     {
@@ -37,8 +37,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: 'Recording duration in milliseconds, 100-30000 (default: 5000)'
           },
           device: {
-            type: 'number',
-            description: 'Device index from list_audio_devices. Omit for system default microphone.'
+            type: ['number', 'string'],
+            description: 'Device to record from: the numeric index or the stable string id, both reported by list_audio_devices. Prefer the id; indexes can shift when devices are added or removed. Omit for system default microphone.'
           }
         }
       }
@@ -54,8 +54,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: 'Recording duration in milliseconds, 100-30000 (default: 5000)'
           },
           device: {
-            type: 'number',
-            description: 'Device index from list_audio_devices. Omit for system default microphone.'
+            type: ['number', 'string'],
+            description: 'Device to record from: the numeric index or the stable string id, both reported by list_audio_devices. Prefer the id; indexes can shift when devices are added or removed. Omit for system default microphone.'
           },
           whisper_model: {
             type: 'string',
