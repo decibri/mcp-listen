@@ -14,13 +14,7 @@ Microphone capture and speech-to-text tools for MCP-compatible agents.
       <td>
         <a href="https://www.npmjs.com/package/mcp-listen"><img src="https://img.shields.io/npm/v/mcp-listen" alt="npm version"></a>&nbsp;
         <a href="https://github.com/decibri/mcp-listen/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="Apache 2.0 License"></a>&nbsp;
-      </td>
-    </tr>
-    <tr>
-      <td><strong>Powered by</strong></td>
-      <td>
-        <a href="https://decibri.com"><img src="https://img.shields.io/badge/decibri-audio_capture-brightgreen" alt="decibri"></a>&nbsp;
-        <a href="https://voxagent.run"><img src="https://img.shields.io/badge/voxagent-voice_pipeline-brightgreen" alt="voxagent"></a>
+        <a href="https://github.com/decibri/mcp-listen/actions/workflows/ci.yml"><img src="https://github.com/decibri/mcp-listen/actions/workflows/ci.yml/badge.svg" alt="CI"></a>&nbsp;
       </td>
     </tr>
   </table>
@@ -149,7 +143,7 @@ mcp-listen uses [decibri](https://decibri.com) for cross-platform microphone cap
 
 Audio is captured as 16-bit PCM at 16kHz mono, the standard format for speech-to-text engines.
 
-The `voice_query` tool replicates the pipeline from [voxagent](https://voxagent.run): capture audio, transcribe locally with whisper.cpp, and send to a local Ollama LLM. Fully offline, nothing leaves your machine.
+The `voice_query` tool runs the full pipeline locally: capture audio, transcribe with whisper.cpp, and send to a local Ollama LLM. Fully offline, nothing leaves your machine.
 
 ## Whisper Model Setup
 
@@ -195,11 +189,6 @@ Some Ollama installations start as a background service automatically. If you se
 
 **Whisper: "model not found"**
 The whisper model file must be downloaded before first use. See [Whisper Model Setup](#whisper-model-setup) for instructions.
-
-## Powered By
-
-- [decibri](https://decibri.com): Cross-platform microphone capture for Node.js
-- [voxagent](https://voxagent.run): Voice-powered terminal agent (inspiration for the voice_query pipeline)
 
 ## License
 

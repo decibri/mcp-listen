@@ -135,31 +135,57 @@ async function run() {
     failed++;
   }
 
-  // Test 4: capture_audio produces WAV file (requires mic)
+  // Test 4: capture_audio delivers the requested duration of PCM, exactly
+  // (requires mic). The WAV must be byte-exact for the requested duration
+  // at the tool's fixed output format, and the header must declare that
+  // format. This cannot distinguish silence from signal; it verifies the
+  // delivery contract, not audio content.
   if (hasDevices) {
     try {
+      const DURATION_MS = 500;
+      // The tool's fixed output format (mirrors lib/audio.js). The header
+      // assertions below verify the produced WAV actually declares it.
+      const SAMPLE_RATE = 16000;
+      const CHANNELS = 1;
+      const BIT_DEPTH = 16;
+      const WAV_HEADER_BYTES = 44;
+      const expectedPcmBytes =
+        Math.round((DURATION_MS * SAMPLE_RATE) / 1000) * CHANNELS * (BIT_DEPTH / 8);
+      const expectedSize = WAV_HEADER_BYTES + expectedPcmBytes;
+
       const res = await server.send('tools/call', {
         name: 'capture_audio',
-        arguments: { duration_ms: 500 }
+        arguments: { duration_ms: DURATION_MS }
       });
       if (res.result.isError) throw new Error(res.result.content[0].text);
       const data = JSON.parse(res.result.content[0].text);
       if (!data.path) throw new Error('No path in response');
       if (!fs.existsSync(data.path)) throw new Error(`File not found: ${data.path}`);
 
-      const header = Buffer.alloc(4);
+      const header = Buffer.alloc(WAV_HEADER_BYTES);
       const fd = fs.openSync(data.path, 'r');
-      fs.readSync(fd, header, 0, 4, 0);
+      fs.readSync(fd, header, 0, WAV_HEADER_BYTES, 0);
       fs.closeSync(fd);
-      if (header.toString('ascii') !== 'RIFF') throw new Error('File does not start with RIFF header');
+      if (header.toString('ascii', 0, 4) !== 'RIFF') throw new Error('File does not start with RIFF header');
+
+      const headerChannels = header.readUInt16LE(22);
+      const headerSampleRate = header.readUInt32LE(24);
+      const headerBitDepth = header.readUInt16LE(34);
+      const headerDataSize = header.readUInt32LE(40);
+      if (headerChannels !== CHANNELS) throw new Error(`Header channels: expected ${CHANNELS}, got ${headerChannels}`);
+      if (headerSampleRate !== SAMPLE_RATE) throw new Error(`Header sample rate: expected ${SAMPLE_RATE}, got ${headerSampleRate}`);
+      if (headerBitDepth !== BIT_DEPTH) throw new Error(`Header bit depth: expected ${BIT_DEPTH}, got ${headerBitDepth}`);
+      if (headerDataSize !== expectedPcmBytes) throw new Error(`Header data size: expected ${expectedPcmBytes}, got ${headerDataSize}`);
 
       const stat = fs.statSync(data.path);
-      if (stat.size <= 44) throw new Error('WAV file contains no audio data');
+      if (stat.size !== expectedSize) {
+        throw new Error(`Expected exactly ${expectedSize} bytes for ${DURATION_MS}ms, got ${stat.size}`);
+      }
 
       // Clean up test file
       try { fs.unlinkSync(data.path); } catch {}
 
-      log('pass', `capture_audio produces valid WAV (${stat.size} bytes)`);
+      log('pass', `capture_audio delivers ${DURATION_MS}ms of PCM exactly (${stat.size} bytes)`);
       passed++;
     } catch (err) {
       log('fail', `capture_audio: ${err.message}`);

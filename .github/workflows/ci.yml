@@ -1,0 +1,78 @@
+name: CI
+
+# Branch pushes and PRs only. Tags belong to publish.yml, which runs its own
+# install/test/pack-verification path on the release ref. The publishing
+# machinery there (registry-url .npmrc, the npm >= 11.5.1 upgrade, the pack
+# gate) exists for publishing reasons and is deliberately absent here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      # A red leg should not mask the state of the other eight. With a native
+      # audio dependency, "broken everywhere" and "broken on one platform"
+      # point at entirely different causes.
+      fail-fast: false
+      # package.json declares engines: node >=18. That is a promise to every
+      # installer, and this matrix is the only thing keeping it honest. If a
+      # Node version has to leave the matrix, raise the engines floor with it.
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['18', '20', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install ALSA (Linux only)
+        # decibri's native addon links ALSA on Linux and a bare runner does
+        # not ship it. Same reasoning as the equivalent step in publish.yml.
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install dependencies
+        # npm ci, not npm install: a green run proves the locked tree works,
+        # not whatever npm resolved today. No --ignore-scripts, unlike
+        # publish.yml: publishing has no use for the native postinstall, but
+        # the smoke tests exercise the decibri binary, so it must run here.
+        run: npm ci
+
+      - name: Diagnostic - raw device enumeration
+        # Not an assertion. The tests spawn the server and parse JSON; this
+        # prints what enumeration actually returns on a bare runner, so the
+        # behaviour is on the record rather than inferred. Especially relevant
+        # on Linux and macOS runners, which have no microphone and no sound
+        # server. Delete this step once the behaviour is established and the
+        # tests handle it explicitly.
+        continue-on-error: true
+        shell: bash
+        run: |
+          node -e '
+            const Decibri = require("decibri");
+            try {
+              const devices = Decibri.devices();
+              console.log("Decibri.devices() returned:");
+              console.log(JSON.stringify(devices, null, 2));
+            } catch (err) {
+              console.log("Decibri.devices() threw:");
+              console.log(err && err.stack ? err.stack : String(err));
+            }
+          '
+
+      - name: Run smoke tests
+        run: npm test
