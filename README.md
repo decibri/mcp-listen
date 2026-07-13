@@ -1,11 +1,20 @@
 <!-- markdownlint-disable MD033 MD041 -->
 
+<p align="center">
+  <a href="https://decibri.com">
+    <img
+      src="https://github.com/user-attachments/assets/62a4c561-da48-401d-9142-220854566330"
+      alt="Decibri mcp-listen"
+      width="100%">
+  </a>
+</p>
+
 # mcp-listen
 
 **Give your AI agents the ability to listen**
 
 Microphone capture and speech-to-text tools for MCP-compatible agents.
-
+        
 <div>
   <!-- badges: start -->
   <table>
