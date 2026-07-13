@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On platforms decibri publishes no binary for, mcp-listen now fails at
   startup with a message naming the platform and listing the supported set,
   instead of surfacing the module loader's generic error.
+- A capture on the default-device path now fails with an actionable error
+  when the system has no usable default input device: if no enumerated
+  device is flagged default and the capture fails, the error reports the
+  device count and points at `list_audio_devices`, with the original error
+  included; if the only input device is the ALSA null device (the state of
+  headless Linux hosts), the default path refuses rather than recording
+  silence. Selecting a device explicitly, including the null device, is
+  unaffected.
 - Cross-platform CI: the smoke tests run on Linux, Windows, and macOS across
   Node.js 18, 20, and 22 on every push and pull request.
 

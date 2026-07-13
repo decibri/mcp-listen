@@ -165,12 +165,13 @@ async function run() {
     failed++;
   }
 
-  // Test 4: capture_audio delivers the requested duration of PCM, exactly
-  // (requires mic). The WAV must be byte-exact for the requested duration
-  // at the tool's fixed output format, and the header must declare that
-  // format. This cannot distinguish silence from signal; it verifies the
-  // delivery contract, not audio content.
-  if (hasDevices) {
+  // Test 4: capture_audio on the default path. When a device is flagged
+  // default, it must deliver the requested duration of PCM, exactly: the
+  // WAV must be byte-exact for the requested duration at the tool's fixed
+  // output format, and the header must declare that format. This cannot
+  // distinguish silence from signal; it verifies the delivery contract,
+  // not audio content. (The no-flagged-default branch follows below.)
+  if (hasDevices && deviceList.some((d) => d.isDefault)) {
     try {
       const DURATION_MS = 500;
       // The tool's fixed output format (mirrors lib/audio.js). The header
@@ -219,6 +220,44 @@ async function run() {
       passed++;
     } catch (err) {
       log('fail', `capture_audio: ${err.message}`);
+      failed++;
+    }
+  } else if (hasDevices) {
+    // Devices exist but none is flagged default. Two legitimate outcomes,
+    // and nothing else: the tool refuses or fails with the actionable
+    // no-usable-default error (headless machines, where the only device is
+    // the ALSA null device or the phantom default does not open), or the
+    // capture succeeds byte-exactly through a working default the host does
+    // not flag (a custom ALSA configuration). A misleading error or a
+    // short WAV fails either way.
+    try {
+      const DURATION_MS = 500;
+      const expectedSize = 44 + Math.round((DURATION_MS * 16000) / 1000) * 2;
+      const res = await server.send('tools/call', {
+        name: 'capture_audio',
+        arguments: { duration_ms: DURATION_MS }
+      });
+      if (res.result.isError) {
+        const text = res.result.content[0].text;
+        if (!text.includes('no usable default input device')) {
+          throw new Error(`Expected the actionable no-default error, got: ${text}`);
+        }
+        if (!text.includes('list_audio_devices')) {
+          throw new Error(`Error must point at list_audio_devices, got: ${text}`);
+        }
+        log('pass', 'default capture returns actionable error (no default device)');
+      } else {
+        const data = JSON.parse(res.result.content[0].text);
+        const stat = fs.statSync(data.path);
+        try { fs.unlinkSync(data.path); } catch {}
+        if (stat.size !== expectedSize) {
+          throw new Error(`Expected exactly ${expectedSize} bytes for ${DURATION_MS}ms, got ${stat.size}`);
+        }
+        log('pass', `default capture byte-exact via unflagged default (${stat.size} bytes)`);
+      }
+      passed++;
+    } catch (err) {
+      log('fail', `default capture (no flagged default): ${err.message}`);
       failed++;
     }
   } else {
@@ -346,6 +385,60 @@ async function run() {
   } catch (err) {
     log('fail', `unsupported platform error: ${err.message}`);
     failed++;
+  }
+
+  // Test 11: when the only device on the machine is the ALSA null device
+  // (headless Linux), a default-path capture is refused rather than
+  // recording a WAV of pure silence. Explicit selection of the null device
+  // stays allowed and is covered by tests 6 and 7 on such machines.
+  if (hasDevices && deviceList.every((d) => d.id === 'alsa:null')) {
+    try {
+      const res = await server.send('tools/call', {
+        name: 'capture_audio',
+        arguments: { duration_ms: 500 }
+      });
+      if (!res.result.isError) {
+        throw new Error(`Expected refusal, got success: ${res.result.content[0].text}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes('no usable default input device')) {
+        throw new Error(`Expected the actionable no-default error, got: ${text}`);
+      }
+      if (/\.wav/i.test(text)) throw new Error(`Refusal must not produce a WAV: ${text}`);
+      log('pass', 'default capture refused when only device is the ALSA null device');
+      passed++;
+    } catch (err) {
+      log('fail', `null-device refusal: ${err.message}`);
+      failed++;
+    }
+  } else if (hasDevices) {
+    log('skip', 'null-device refusal (machine has real input devices)');
+    skipped++;
+  } else {
+    log('skip', 'null-device refusal (no microphone available)');
+    skipped++;
+  }
+
+  // Tests 12-15: deterministic simulations of the guarded machine states,
+  // valid on every platform: no flagged default failing via the error
+  // event and via a constructor throw (both must translate), the null-only
+  // machine (refused on the default path, still selectable explicitly),
+  // and a mid-capture failure after audio arrived (must NOT be
+  // translated). See test/stub-device-states.js.
+  for (const mode of ['no-default', 'no-default-throw', 'null-only', 'mid-capture']) {
+    try {
+      const sim = spawnSync(process.execPath,
+        [path.join(__dirname, 'stub-device-states.js'), mode],
+        { encoding: 'utf8' });
+      if (sim.status !== 0) {
+        throw new Error(`simulation exited ${sim.status}: ${(sim.stderr || sim.stdout || '').trim().slice(0, 300)}`);
+      }
+      log('pass', `simulated ${mode} state handled as specified`);
+      passed++;
+    } catch (err) {
+      log('fail', `simulated ${mode} state: ${err.message}`);
+      failed++;
+    }
   }
 
   server.kill();
