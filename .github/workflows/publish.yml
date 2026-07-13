@@ -105,9 +105,9 @@ jobs:
           echo "OK: npm ${NPM_VERSION} supports trusted publishing"
 
       - name: Install ALSA runtime (Linux)
-        # decibri's native addon links ALSA on Linux. Harmless today at decibri
-        # 1.x; required once decibri 5.x lands. Mirrors the platform setup in the
-        # decibri repo's own build matrix.
+        # decibri's native addon links ALSA on Linux. Required since decibri
+        # 5.x. Mirrors the platform setup in the decibri repo's own build
+        # matrix.
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       - name: Install dependencies
