@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-14
+
+### Changed
+
+- Every tool input schema now declares `additionalProperties: false` and an
+  explicit `required` array. The MCP SDK does not enforce the input schema
+  at the transport layer, so this does not change what the handlers accept;
+  it tells validating clients and schema-aware layers to reject arguments
+  the tool does not declare. No parameter is added, removed, or renamed,
+  and every existing valid call is unaffected.
+- Raised the declared floor for `@modelcontextprotocol/sdk` from `^1.0.0`
+  to `^1.25.2`, past the fixes for GHSA-w48q-cv73-mx4w (patched in 1.24.0)
+  and GHSA-8r9q-7v3j-jr4g (patched in 1.25.2). Neither advisory is
+  reachable in this server, which speaks stdio only and registers no
+  resource templates, but the declared range is the only version
+  constraint consumers get: npm does not ship a lockfile inside the
+  package, so the floor must not admit a vulnerable version. This
+  project's own resolution (1.29.0) is unchanged.
+
+### Added
+
+- `SECURITY.md`: a security policy covering responsible disclosure, what
+  the server accesses on the machine it runs on, why it runs natively
+  rather than in a container, and the supply chain posture of the
+  published package.
+- Dependabot configuration covering npm dependencies and GitHub Actions
+  workflow versions, on a weekly schedule.
+
 ## [0.2.0] - 2026-07-13
 
 ### Changed
@@ -112,7 +140,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/decibri/mcp-listen/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/decibri/mcp-listen/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/decibri/mcp-listen/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/decibri/mcp-listen/compare/v0.1.1...v0.1.2
