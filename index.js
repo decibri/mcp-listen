@@ -12,6 +12,11 @@ const { chat } = require('./lib/llm');
 
 // ── Server ─────────��───────────────────────��────────────────
 
+// Tools only: no resources or resource templates are registered, and that
+// is load-bearing. The SDK's resources/read path has carried a ReDoS
+// advisory (GHSA-8r9q-7v3j-jr4g, patched in 1.25.2) that this server does
+// not reach only because it registers no resources. Anyone adding a
+// resource here must first confirm the SDK floor is current.
 const server = new Server(
   { name: 'mcp-listen', version },
   { capabilities: { tools: {} } }

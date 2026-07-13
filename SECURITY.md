@@ -35,6 +35,18 @@ mcp-listen:
 
 It does not collect telemetry or phone home. It runs with the privileges of the user who starts it.
 
+## Why mcp-listen Runs Natively
+
+mcp-listen does not ship a container image. This is a considered position, not an omission.
+
+The server's purpose is to capture audio from the host machine's microphone, and containerisation is not a meaningful boundary for that job:
+
+- On macOS and Windows, a container cannot reach the host microphone in any standard configuration: Linux containers run inside a virtual machine with no route to the host's audio hardware, and Windows-native containers have no audio capture support.
+- On Linux, a container can reach the microphone only by passing the audio device or the sound-server socket through the container boundary, which reopens exactly the boundary the container was supposed to provide.
+- Containerisation adds no consent layer either. Where the operating system has microphone consent controls (the per-app prompt on macOS, the desktop-app microphone privacy setting on Windows), they govern native processes; a containerised capture path would sit outside those controls, not strengthen them.
+
+The runtime posture is the mitigation instead: the server speaks only stdio to the client that spawned it, opens no listening sockets, makes no network calls other than to the local Ollama daemon, executes no code at install time, and runs as the user who started it.
+
 ## Supply Chain and Package Integrity
 
 mcp-listen is published to npm as a single JavaScript package. It ships no binaries of its own; the native audio layer comes from the `decibri` dependency, which has its own security policy.
