@@ -47,9 +47,11 @@ jobs:
 
       - name: Install dependencies
         # npm ci, not npm install: a green run proves the locked tree works,
-        # not whatever npm resolved today. No --ignore-scripts, unlike
-        # publish.yml: publishing has no use for the native postinstall, but
-        # the smoke tests exercise the decibri binary, so it must run here.
+        # not whatever npm resolved today. Scripts stay enabled, unlike
+        # publish.yml: nothing in the tree declares an install script today
+        # (decibri ships prebuilt binaries as optional dependencies), so
+        # --ignore-scripts would change nothing, and the default keeps this
+        # job faithful to what a consumer's npm install actually does.
         run: npm ci
 
       - name: Diagnostic - raw device enumeration

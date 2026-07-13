@@ -123,7 +123,12 @@ async function run() {
     return;
   }
 
-  // Test 2: All 3 tools advertised
+  // Test 2: All 3 tools advertised, each with a strict input schema. The
+  // SDK does not enforce the input schema at the transport layer, so the
+  // schema is the only place undeclared arguments can be rejected, and only
+  // by a validating client or layer. That makes additionalProperties: false
+  // and an explicit required array part of the tool contract: every schema
+  // must declare both, even when required is empty.
   try {
     const res = await server.send('tools/list', {});
     const names = res.result.tools.map(t => t.name).sort();
@@ -131,7 +136,19 @@ async function run() {
     if (JSON.stringify(names) !== JSON.stringify(expected)) {
       throw new Error(`Expected tools ${expected}, got ${names}`);
     }
-    log('pass', 'All 3 tools advertised');
+    for (const tool of res.result.tools) {
+      const schema = tool.inputSchema;
+      if (!schema || schema.type !== 'object') {
+        throw new Error(`${tool.name}: inputSchema must be an object schema`);
+      }
+      if (schema.additionalProperties !== false) {
+        throw new Error(`${tool.name}: inputSchema must declare additionalProperties: false`);
+      }
+      if (!Array.isArray(schema.required)) {
+        throw new Error(`${tool.name}: inputSchema must declare an explicit required array`);
+      }
+    }
+    log('pass', 'All 3 tools advertised with strict input schemas');
     passed++;
   } catch (err) {
     log('fail', `All 3 tools advertised: ${err.message}`);

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Every tool input schema now declares `additionalProperties: false` and an
+  explicit `required` array. The MCP SDK does not enforce the input schema
+  at the transport layer, so this does not change what the handlers accept;
+  it tells validating clients and schema-aware layers to reject arguments
+  the tool does not declare. No parameter is added, removed, or renamed,
+  and every existing valid call is unaffected.
+
+### Added
+
+- `SECURITY.md`: a security policy covering responsible disclosure, what
+  the server accesses on the machine it runs on, and the supply chain
+  posture of the published package.
+- Dependabot configuration covering npm dependencies and GitHub Actions
+  workflow versions, on a weekly schedule.
+
 ## [0.2.0] - 2026-07-13
 
 ### Changed

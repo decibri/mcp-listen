@@ -24,7 +24,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'list_audio_devices',
       description: 'List available audio input devices (microphones) on this machine. Each device has a numeric index, a human-readable name, and a stable id. Prefer the id when selecting a device: indexes can shift when devices are added or removed, and names are not unique.',
-      inputSchema: { type: 'object', properties: {} }
+      inputSchema: { type: 'object', properties: {}, required: [], additionalProperties: false }
     },
     {
       name: 'capture_audio',
@@ -40,7 +40,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: ['number', 'string'],
             description: 'Device to record from: the numeric index or the stable string id, both reported by list_audio_devices. Prefer the id; indexes can shift when devices are added or removed. Omit for system default microphone.'
           }
-        }
+        },
+        required: [],
+        additionalProperties: false
       }
     },
     {
@@ -73,7 +75,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description: 'System prompt for the LLM (default: You are a helpful assistant.)'
           }
-        }
+        },
+        required: [],
+        additionalProperties: false
       }
     }
   ]
