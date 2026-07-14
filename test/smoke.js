@@ -3,6 +3,7 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { version } = require('../package.json');
 
 const SERVER_PATH = path.join(__dirname, '..', 'index.js');
@@ -456,6 +457,190 @@ async function run() {
       log('fail', `simulated ${mode} state: ${err.message}`);
       failed++;
     }
+  }
+
+  // Tests 16-19: argument validation. The SDK checks only that arguments
+  // is a record, so the schema's types and ranges bind in lib/validate.js,
+  // before the audio layer or the filesystem is reached. Each wire batch
+  // asserts the rejection is actionable (names the parameter, shows what
+  // was received) and that no WAV appeared in the temp directory: several
+  // of these inputs used to reach the capture path (a numeric string
+  // recorded for real; a non-numeric string opened the microphone and
+  // stalled), so the absence of a file is the regression being pinned.
+  const tmpWavs = () =>
+    fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('mcp-listen-') && f.endsWith('.wav'));
+
+  // Test 16: capture_audio rejects malformed duration_ms
+  try {
+    const before = tmpWavs();
+    const cases = [
+      { args: { duration_ms: '500' }, expect: 'duration_ms must be a number' },
+      { args: { duration_ms: 'abc' }, expect: 'duration_ms must be a number' },
+      { args: { duration_ms: 500.5 }, expect: 'duration_ms must be an integer' },
+      { args: { duration_ms: 50 }, expect: 'duration_ms must be between 100 and 30000' },
+      { args: { duration_ms: 50000 }, expect: 'duration_ms must be between 100 and 30000' },
+      { args: { duration_ms: true }, expect: 'duration_ms must be a number' },
+      { args: { duration_ms: {} }, expect: 'duration_ms must be a number' },
+      { args: { duration_ms: [500] }, expect: 'duration_ms must be a number' }
+    ];
+    for (const c of cases) {
+      const res = await server.send('tools/call', { name: 'capture_audio', arguments: c.args });
+      if (!res.result || !res.result.isError) {
+        throw new Error(`expected isError for duration_ms=${JSON.stringify(c.args.duration_ms)}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes(c.expect)) {
+        throw new Error(`expected "${c.expect}" for ${JSON.stringify(c.args.duration_ms)}, got: ${text}`);
+      }
+    }
+    const after = tmpWavs();
+    if (after.length > before.length) {
+      throw new Error(`rejected calls wrote to disk: ${after.filter((f) => !before.includes(f))}`);
+    }
+    log('pass', `capture_audio rejects malformed duration_ms (${cases.length} cases, nothing written)`);
+    passed++;
+  } catch (err) {
+    log('fail', `malformed duration_ms: ${err.message}`);
+    failed++;
+  }
+
+  // Test 17: capture_audio rejects malformed device
+  try {
+    const before = tmpWavs();
+    const cases = [
+      { device: true, expect: 'device must be a number (device index) or a string (device id)' },
+      { device: {}, expect: 'device must be a number (device index) or a string (device id)' },
+      { device: [1], expect: 'device must be a number (device index) or a string (device id)' },
+      { device: '', expect: 'device id must be a non-empty string' },
+      { device: 1.5, expect: 'device index must be a non-negative integer' },
+      { device: -1, expect: 'device index must be a non-negative integer' }
+    ];
+    for (const c of cases) {
+      const res = await server.send('tools/call', {
+        name: 'capture_audio',
+        arguments: { duration_ms: 500, device: c.device }
+      });
+      if (!res.result || !res.result.isError) {
+        throw new Error(`expected isError for device=${JSON.stringify(c.device)}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes(c.expect)) {
+        throw new Error(`expected "${c.expect}" for ${JSON.stringify(c.device)}, got: ${text}`);
+      }
+      if (!text.includes('list_audio_devices')) {
+        throw new Error(`device error must point at list_audio_devices: ${text}`);
+      }
+    }
+    const after = tmpWavs();
+    if (after.length > before.length) {
+      throw new Error(`rejected calls wrote to disk: ${after.filter((f) => !before.includes(f))}`);
+    }
+    log('pass', `capture_audio rejects malformed device (${cases.length} cases, nothing written)`);
+    passed++;
+  } catch (err) {
+    log('fail', `malformed device: ${err.message}`);
+    failed++;
+  }
+
+  // Test 18: voice_query validates every argument before capture starts.
+  // These messages can only come from the validator: the old path either
+  // recorded first or surfaced a transcribe/LLM error, never a type error
+  // naming the parameter.
+  try {
+    const before = tmpWavs();
+    const cases = [
+      { args: { whisper_model: 5 }, expect: 'whisper_model must be a string' },
+      { args: { language: 3 }, expect: 'language must be a string' },
+      { args: { model: {} }, expect: 'model must be a string' },
+      { args: { prompt: false }, expect: 'prompt must be a string' },
+      { args: { duration_ms: '5000' }, expect: 'duration_ms must be a number' },
+      { args: { device: {} }, expect: 'device must be a number (device index) or a string (device id)' }
+    ];
+    for (const c of cases) {
+      const res = await server.send('tools/call', { name: 'voice_query', arguments: c.args });
+      if (!res.result || !res.result.isError) {
+        throw new Error(`expected isError for ${JSON.stringify(c.args)}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes(c.expect)) {
+        throw new Error(`expected "${c.expect}" for ${JSON.stringify(c.args)}, got: ${text}`);
+      }
+    }
+    const after = tmpWavs();
+    if (after.length > before.length) {
+      throw new Error(`rejected calls wrote to disk: ${after.filter((f) => !before.includes(f))}`);
+    }
+    log('pass', `voice_query rejects malformed arguments (${cases.length} cases, nothing written)`);
+    passed++;
+  } catch (err) {
+    log('fail', `voice_query validation: ${err.message}`);
+    failed++;
+  }
+
+  // Test 19: unknown arguments are rejected on every tool. The schemas
+  // declare additionalProperties: false; the SDK does not enforce it, so
+  // without this an unknown argument is silently ignored, and a caller
+  // sending output_path is left believing it was honoured.
+  try {
+    const cases = [
+      { name: 'list_audio_devices', args: { foo: 1 }, key: 'foo', accepted: 'none' },
+      { name: 'capture_audio', args: { output_path: 'x.wav' }, key: 'output_path', accepted: 'duration_ms, device' },
+      { name: 'voice_query', args: { extra: true }, key: 'extra', accepted: 'duration_ms, device, whisper_model, language, model, prompt' }
+    ];
+    for (const c of cases) {
+      const res = await server.send('tools/call', { name: c.name, arguments: c.args });
+      if (!res.result || !res.result.isError) {
+        throw new Error(`expected isError for ${c.name} with ${c.key}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes(`unknown argument "${c.key}" for ${c.name}`)) {
+        throw new Error(`error must name the argument and tool, got: ${text}`);
+      }
+      if (!text.includes(`Accepted arguments: ${c.accepted}`)) {
+        throw new Error(`error must list accepted arguments, got: ${text}`);
+      }
+    }
+    log('pass', 'unknown arguments rejected on all 3 tools');
+    passed++;
+  } catch (err) {
+    log('fail', `unknown arguments: ${err.message}`);
+    failed++;
+  }
+
+  // Test 20: values JSON-RPC cannot carry (NaN, Infinity, undefined) are
+  // exercised against the validators directly. This is the only layer that
+  // can see them: they arise from in-process callers, not the wire.
+  try {
+    const { validateCaptureArgs, validateVoiceQueryArgs } = require('../lib/validate');
+    const expectError = (result, needle, label) => {
+      if (!result.error) throw new Error(`${label}: expected rejection`);
+      const text = result.error.content[0].text;
+      if (!text.includes(needle)) throw new Error(`${label}: expected "${needle}", got: ${text}`);
+    };
+
+    expectError(validateCaptureArgs({ duration_ms: NaN }), 'duration_ms must be a finite number', 'NaN duration');
+    expectError(validateCaptureArgs({ duration_ms: Infinity }), 'duration_ms must be a finite number', 'Infinity duration');
+    expectError(validateCaptureArgs({ duration_ms: -Infinity }), 'duration_ms must be a finite number', '-Infinity duration');
+    expectError(validateCaptureArgs({ device: NaN }), 'device index must be a non-negative integer', 'NaN device');
+    expectError(validateCaptureArgs({ device: Infinity }), 'device index must be a non-negative integer', 'Infinity device');
+    expectError(validateVoiceQueryArgs({ whisper_model: NaN }), 'whisper_model must be a string', 'NaN whisper_model');
+
+    // Absent means the documented default: null and undefined normalize
+    // identically, and valid values pass through unchanged.
+    const defaults = validateCaptureArgs({ duration_ms: null, device: null });
+    if (defaults.error) throw new Error(`null must select defaults, got: ${defaults.error.content[0].text}`);
+    if (defaults.durationMs !== undefined || defaults.device !== undefined) {
+      throw new Error('null must normalize to undefined for the default path');
+    }
+    const valid = validateCaptureArgs({ duration_ms: 500, device: 0 });
+    if (valid.error || valid.durationMs !== 500 || valid.device !== 0) {
+      throw new Error('valid arguments must pass through unchanged');
+    }
+    log('pass', 'validators reject NaN/Infinity and normalize null to defaults');
+    passed++;
+  } catch (err) {
+    log('fail', `validator unit checks: ${err.message}`);
+    failed++;
   }
 
   server.kill();

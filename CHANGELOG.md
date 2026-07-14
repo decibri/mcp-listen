@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-14
+
+### Changed
+
+- **Breaking: arguments not declared in a tool's input schema are now
+  rejected rather than silently ignored.** Every tool schema has declared
+  `additionalProperties: false` since 0.2.1; it is now enforced. A caller
+  sending an undeclared argument, including `output_path` to
+  `capture_audio`, receives an error naming the argument and listing the
+  accepted ones. Previously such arguments were dropped without notice,
+  leaving the caller believing they took effect.
+- **Breaking: arguments are now validated against their declared types
+  before anything is opened, allocated, or written.** `duration_ms` must
+  be a finite integer between 100 and 30000: a string, a fraction, `NaN`,
+  or `Infinity` is rejected rather than coerced, where a numeric string
+  previously recorded by coercion. `device` must be a non-negative integer
+  index or a non-empty string id from `list_audio_devices`; any other type
+  is rejected instead of being passed to the capture engine.
+  `whisper_model`, `language`, `model`, and `prompt` must be strings.
+  Every rejection names the parameter, shows what was received, and states
+  what is accepted, and a rejected call writes nothing to disk. `null`
+  selects the documented default for every optional parameter, consistent
+  with the existing handling of `device: null`. Calls that were valid per
+  the declared schemas behave exactly as before; no parameter is added,
+  removed, or renamed.
+- The WAV file write and the `voice_query` temp file cleanup now use
+  asynchronous file I/O, so a capture no longer blocks the event loop
+  while its WAV is written or removed. The capture stall guard is cleared
+  once the requested audio has arrived, before the write begins, so it
+  cannot race the write's result.
+
+### Fixed
+
+- A non-numeric `duration_ms` corrupted the capture stall guard: the value
+  was concatenated into the timeout rather than added, so a string such as
+  `"500"` produced a stall-guard timeout of roughly 83 minutes, during
+  which a stalled stream would have held the microphone open. Type
+  validation now rejects the call before the microphone is touched.
+- A non-numeric `duration_ms` also passed the range check outright, since
+  every comparison with `NaN` is false: the microphone opened with a byte
+  target of `NaN` that could never be met, and the capture always ran to
+  the stall guard.
+- A non-string `whisper_model` failed the request only after recording had
+  already happened, surfacing as a protocol-level internal error rather
+  than a tool error. It is now rejected before capture.
+- `null` for `language`, `model`, or `prompt` was passed raw into the
+  transcription and LLM layers; it now selects the documented default.
+
+### Security
+
+- Raised the declared floor for `@modelcontextprotocol/sdk` from `^1.25.2`
+  to `^1.26.0`, past the fix for GHSA-345p-7cg4-v4c7 (cross-client data
+  leak via shared server or transport instances, patched in 1.26.0). The
+  advisory is not reachable in this server, which serves a single client
+  over stdio and connects one `Server` to one transport exactly once, but
+  the declared range is the only version constraint consumers get and must
+  not admit a version inside a published advisory. Nothing this server
+  uses requires an SDK newer than 1.25.2; the raise is the advisory, not
+  compatibility. This project's own resolution (1.29.0) is unchanged.
+
 ## [0.2.1] - 2026-07-14
 
 ### Changed
@@ -140,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/decibri/mcp-listen/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/decibri/mcp-listen/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/decibri/mcp-listen/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/decibri/mcp-listen/compare/v0.1.2...v0.1.3
