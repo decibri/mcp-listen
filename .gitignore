@@ -12,3 +12,6 @@ mcp-publisher.exe
 .mcpregistry_registry_token
 
 CLAUDE.local.md
+
+# Generated publish package, assembled by scripts/build-package.js
+dist/

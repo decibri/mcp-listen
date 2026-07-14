@@ -28,7 +28,7 @@ Understanding what the server touches is useful context when assessing the impac
 mcp-listen:
 
 - Reads from audio input devices when a capture tool is invoked
-- Writes WAV files to the system temporary directory. `capture_audio` returns the recording's path to the caller; `voice_query` deletes its recording when the query completes.
+- Writes WAV files to the system temporary directory. `capture_audio` returns the recording's path to the caller; `voice_query` deletes its recording when the query completes. At startup the server removes its own recordings older than 24 hours from the temporary directory, matching only the file names it generates, so `capture_audio` recordings do not accumulate indefinitely.
 - Transcribes captured audio locally, in process, using whisper.cpp. Audio never leaves the machine.
 - Sends transcribed text to the local Ollama daemon at `127.0.0.1:11434` when `voice_query` is used. This is the only network call in the codebase. An Ollama daemon configured with cloud models will relay that text off the machine; that relay is a property of the user's Ollama configuration, not of mcp-listen, but it is worth knowing when assessing where text can travel.
 - Reads the `WHISPER_MODEL_PATH` environment variable to locate the local Whisper model. It reads no API credentials: none are used. The bundled Ollama client library can read `OLLAMA_API_KEY`, but it attaches that credential only to requests to `ollama.com`, and mcp-listen only ever calls the local daemon, so that code path is unreachable.
@@ -55,7 +55,8 @@ mcp-listen is published to npm as a single JavaScript package. It ships no binar
 
 - The package is published exclusively from GitHub Actions on GitHub-hosted runners. Nothing is published manually.
 - Publishing is triggered only by tagged releases and is gated behind a protected GitHub environment requiring manual approval, restricted to `v*` tags.
-- A pre-publish verification gate asserts that every file the package ships is present in the tarball and fails the release if any credential, publisher binary, or test fixture is present.
+- The published package is assembled into a build directory by a generator that copies the runtime files and writes a manifest containing only an explicit allowlist of consumer-facing fields. The development manifest, with its scripts and tooling, is never published.
+- A pre-publish verification gate asserts that every file the package ships is present in the tarball, that no credential, publisher binary, or test fixture is present, and that the published manifest carries no scripts and no development dependencies. It fails the release otherwise.
 - The full build and release configuration is open source and auditable in `.github/workflows/publish.yml`.
 
 ### Publishing and authentication
@@ -79,8 +80,8 @@ This security policy applies to the following versions:
 
 | Version | Supported |
 | --- | --- |
-| 0.2.x | Yes |
-| < 0.2 | No |
+| 0.4.x | Yes |
+| < 0.4 | No |
 
 Security fixes are applied to the latest release only. mcp-listen is pre-1.0 and older versions are not backported. Upgrade to the latest release.
 

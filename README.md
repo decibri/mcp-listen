@@ -91,6 +91,8 @@ Intel Mac (darwin-x64) is not supported: Apple has discontinued the platform and
 
 ## Tool Reference
 
+Arguments are validated before anything is recorded or written. An argument a tool does not declare is rejected with an error naming it, rather than silently ignored. `duration_ms` must be an integer between 100 and 30000; `device` must be a non-negative integer index or a non-empty string id from `list_audio_devices`. A rejected call writes nothing to disk.
+
 ### list_audio_devices
 
 Returns a JSON array of available audio input devices.
@@ -194,9 +196,9 @@ The model is ~150MB and downloads once. You can also set the `WHISPER_MODEL_PATH
 
 1. **Fixed recording duration.** You specify how long to record. There is no "stop when I stop talking" mode yet.
 2. **`voice_query` requires Ollama running.** If Ollama isn't running, the tool returns a clear error message.
-3. **Whisper model downloads on first use.** The first `voice_query` call requires a pre-downloaded model (~150MB).
+3. **Whisper model must be downloaded before first use.** `voice_query` does not download the model itself; the first call requires a pre-downloaded model (~150MB). See [Whisper Model Setup](#whisper-model-setup).
 4. **No streaming.** MCP's request/response pattern means the entire recording is captured, then transcribed, then sent to the LLM. No real-time partial results.
-5. **Temp files.** `capture_audio` writes WAV files to the system temp directory. They are not automatically cleaned up. `voice_query` cleans up after itself.
+5. **Temp files.** `capture_audio` writes WAV files to the system temp directory and returns the path, so the file has to outlive the call for the caller to read it. Recordings older than 24 hours are removed the next time the server starts; recordings made since the last restart persist until then. `voice_query` deletes its recording as soon as the query completes.
 
 ## Troubleshooting
 
@@ -208,6 +210,9 @@ Some Ollama installations start as a background service automatically. If you se
 
 **Whisper: "model not found"**
 The whisper model file must be downloaded before first use. See [Whisper Model Setup](#whisper-model-setup) for instructions.
+
+**Whisper: "installed but failed to load"**
+The `@kutalia/whisper-node-addon` package is present but a native library it depends on is missing or incompatible on your system. The error includes the underlying loader message naming the library. Reinstalling the package will not help; resolve the named library instead.
 
 ## License
 
