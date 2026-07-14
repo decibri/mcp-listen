@@ -14,7 +14,8 @@ on:
 permissions:
   # `contents: write` permits the `gh release create` step.
   # `id-token: write` is required for npm Trusted Publisher OIDC token
-  # issuance.
+  # issuance, and also for the MCP registry's `github-oidc` login. One
+  # declaration serves both; it is deliberately not repeated per job.
   contents: write
   id-token: write
 
@@ -34,30 +35,57 @@ jobs:
             echo "Publishing run. Trigger: ${{ github.event_name }}. Tag: ${{ github.ref_name }}"
           fi
 
-      - name: Assert tag version matches package.json
+      - name: Assert tag version matches package.json and server.json
         if: github.event_name == 'push'
         shell: bash
         run: |
           # Tag form: refs/tags/v0.2.0 -> TAG_VERSION=0.2.0
           # Pre-release tags (v0.2.0-rc.1) are allowed; the suffix is
-          # preserved and must match the manifest if used.
+          # preserved and must match the manifests if used.
           TAG_VERSION="${{ github.ref_name }}"
           TAG_VERSION="${TAG_VERSION#v}"
           echo "Tag version: ${TAG_VERSION}"
 
+          FAIL=0
+
           # jq is preinstalled on ubuntu-latest runners; no setup needed.
           PKG_VERSION=$(jq -r .version package.json)
           echo "package.json: ${PKG_VERSION}"
-
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "ERROR: tag v${TAG_VERSION} does not match package.json version ${PKG_VERSION}"
+            FAIL=1
+          fi
+
+          # server.json is what the MCP registry publishes, and it carries the
+          # version twice: once at the top level and once per packages[]
+          # entry. A stale value here would put a version on the registry
+          # that does not exist on npm. Assert rather than overwrite from the
+          # tag at publish time: deriving the version would hide the mismatch
+          # instead of catching it.
+          SERVER_VERSION=$(jq -r .version server.json)
+          echo "server.json: ${SERVER_VERSION}"
+          if [ "$TAG_VERSION" != "$SERVER_VERSION" ]; then
+            echo "ERROR: tag v${TAG_VERSION} does not match server.json version ${SERVER_VERSION}"
+            FAIL=1
+          fi
+
+          PKG_ENTRY_VERSIONS=$(jq -r '[.packages[].version] | join(", ")' server.json)
+          echo "server.json packages[]: ${PKG_ENTRY_VERSIONS}"
+          BAD_ENTRY_VERSIONS=$(jq -r --arg v "$TAG_VERSION" \
+            '[.packages[].version | select(. != $v)] | join(", ")' server.json)
+          if [ -n "$BAD_ENTRY_VERSIONS" ]; then
+            echo "ERROR: tag v${TAG_VERSION} does not match server.json packages[] version(s) ${BAD_ENTRY_VERSIONS}"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
             echo ""
             echo "Release aborted: version mismatch detected."
-            echo "Bump package.json (and package-lock.json and server.json) to ${TAG_VERSION}, then re-tag."
+            echo "Bump package.json, package-lock.json, and server.json (both version fields) to ${TAG_VERSION}, then re-tag."
             exit 1
           fi
 
-          echo "OK: tag and package.json agree on ${TAG_VERSION}"
+          echo "OK: tag, package.json, and server.json all agree on ${TAG_VERSION}"
 
   # Everything that is not the publish itself lives here, outside the `npm`
   # environment, so a workflow_dispatch dry run can execute the full
@@ -323,3 +351,42 @@ jobs:
           echo "Verifying npm registry view for mcp-listen@${VERSION}"
           sleep 30
           npm view "mcp-listen@${VERSION}"
+
+      # The MCP registry entry (io.github.decibri/mcp-listen, from
+      # server.json) is published from this same job, after the npm publish,
+      # rather than from a separate workflow:
+      #
+      # - The registry validates that the npm package exists at the published
+      #   version and carries the matching `mcpName`, so this must run after
+      #   the npm publish, not in parallel with it.
+      # - A second workflow racing this one would be fragile and could
+      #   publish a registry entry for a version npm rejected.
+      # - The `npm` environment gate on this job already provides the
+      #   required-reviewer protection the registry docs recommend for a
+      #   credential that can write to the whole io.github.decibri/*
+      #   namespace.
+      #
+      # Authentication is GitHub OIDC. The registry derives the namespace
+      # claim from the repository the workflow runs in: decibri/mcp-listen
+      # grants io.github.decibri/*. An org namespace cannot be claimed from a
+      # personal login, because `decibri` is an organisation and not a user,
+      # so a workflow on this repository is the only path. No secret is
+      # involved; the `id-token: write` permission declared at the top of
+      # this file serves this login as well as npm trusted publishing.
+      - name: Install mcp-publisher
+        if: github.event_name == 'push'
+        # This is the registry's own install snippet. The binary is fetched
+        # per run rather than committed, so it cannot go stale in the repo.
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to the MCP Registry
+        if: github.event_name == 'push'
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to the MCP Registry
+        if: github.event_name == 'push'
+        # Publishes server.json from the repo root. Preflight has already
+        # asserted that both of its version fields match the tag, so the
+        # entry cannot advertise a version that does not exist on npm.
+        run: ./mcp-publisher publish

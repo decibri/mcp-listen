@@ -62,6 +62,7 @@ mcp-listen is published to npm as a single JavaScript package. It ships no binar
 ### Publishing and authentication
 
 - npm publishing uses Trusted Publishing via OIDC. No long-lived npm tokens are stored in the repository or CI system. Each publish uses a short-lived, workflow-specific credential issued by npm.
+- The MCP registry entry (`io.github.decibri/mcp-listen`) is published by the same release workflow, after the npm publish succeeds and behind the same approval-gated environment. Authentication also uses OIDC: the registry derives the namespace from the repository the workflow runs in, so no registry credential is stored in the repository or CI system either.
 - The package declares no install or post-install scripts, and neither does any package in its dependency tree. Installing mcp-listen executes no code on the consumer's machine.
 
 ### Provenance and attestation
