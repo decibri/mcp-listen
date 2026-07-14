@@ -9,6 +9,11 @@ const { version } = require('./package.json');
 const { listDevices, captureAudio, getActiveMic } = require('./lib/audio');
 const { transcribe } = require('./lib/transcribe');
 const { chat } = require('./lib/llm');
+const {
+  validateListDevicesArgs,
+  validateCaptureArgs,
+  validateVoiceQueryArgs
+} = require('./lib/validate');
 
 // ── Server ─────────��───────────────────────��────────────────
 
@@ -90,21 +95,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 // ── Tool execution ─────────────────��────────────────────────
 
+// Arguments are validated before dispatch reaches any handler: the SDK
+// only checks that arguments is a record, so the schema's types and
+// ranges bind here, before anything is opened, allocated, or written.
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
 
   switch (name) {
-    case 'list_audio_devices':
+    case 'list_audio_devices': {
+      const v = validateListDevicesArgs(args);
+      if (v.error) return v.error;
       return listDevices();
+    }
 
-    case 'capture_audio':
+    case 'capture_audio': {
+      const v = validateCaptureArgs(args);
+      if (v.error) return v.error;
       return captureAudio({
-        durationMs: args.duration_ms,
-        device: args.device
+        durationMs: v.durationMs,
+        device: v.device
       });
+    }
 
-    case 'voice_query':
-      return voiceQuery(args);
+    case 'voice_query': {
+      const v = validateVoiceQueryArgs(args);
+      if (v.error) return v.error;
+      return voiceQuery(v);
+    }
 
     default:
       return {
@@ -114,11 +131,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-async function voiceQuery(args) {
+// Takes the validated, normalized values from validateVoiceQueryArgs,
+// never the raw request arguments.
+async function voiceQuery(v) {
   // Step 1: Capture audio
   const captureResult = await captureAudio({
-    durationMs: args.duration_ms,
-    device: args.device
+    durationMs: v.durationMs,
+    device: v.device
   });
 
   if (captureResult.isError) return captureResult;
@@ -138,8 +157,8 @@ async function voiceQuery(args) {
     // Step 2: Transcribe
     const transcribeResult = await transcribe({
       filePath: wavPath,
-      modelPath: args.whisper_model,
-      language: args.language
+      modelPath: v.whisperModel,
+      language: v.language
     });
 
     if (transcribeResult.error) {
@@ -159,8 +178,8 @@ async function voiceQuery(args) {
     // Step 3: Send to LLM
     const llmResult = await chat({
       text: transcribeResult.transcription,
-      model: args.model,
-      systemPrompt: args.prompt
+      model: v.model,
+      systemPrompt: v.prompt
     });
 
     if (llmResult.error) {
@@ -182,7 +201,7 @@ async function voiceQuery(args) {
     };
   } finally {
     // Clean up temp WAV file
-    try { fs.unlinkSync(wavPath); } catch {}
+    await fs.promises.unlink(wavPath).catch(() => {});
   }
 }
 

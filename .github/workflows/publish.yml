@@ -167,6 +167,7 @@ jobs:
             lib/audio.js \
             lib/llm.js \
             lib/transcribe.js \
+            lib/validate.js \
             lib/wav.js \
             README.md \
             LICENSE \
