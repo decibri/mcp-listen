@@ -645,6 +645,29 @@ async function run() {
 
   server.kill();
 
+  // Tests 21-23: deterministic child-process suites, valid on every
+  // platform with no whisper model, no Ollama, and no microphone:
+  // the optional-dependency load failures (not-installed vs installed-
+  // but-broken must produce different, actionable messages), the startup
+  // temp-file sweep (removes only stale recordings this tool created),
+  // and the packed manifest (the published package carries no test
+  // script, so npm test in an installed copy cannot fail on a module
+  // that was never shipped).
+  for (const script of ['stub-loader-errors.js', 'temp-sweep.js', 'packed-manifest.js']) {
+    try {
+      const suite = spawnSync(process.execPath, [path.join(__dirname, script)],
+        { encoding: 'utf8', timeout: 240000 });
+      if (suite.status !== 0) {
+        throw new Error(`exited ${suite.status}: ${(suite.stderr || suite.stdout || '').trim().slice(0, 300)}`);
+      }
+      log('pass', `${script.replace('.js', '')} suite`);
+      passed++;
+    } catch (err) {
+      log('fail', `${script.replace('.js', '')} suite: ${err.message}`);
+      failed++;
+    }
+  }
+
   console.log(`\n  ${passed} passed, ${failed} failed, ${skipped} skipped\n`);
   process.exit(failed > 0 ? 1 : 0);
 }

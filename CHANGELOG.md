@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-14
+
+### Fixed
+
+- A whisper addon that is installed but fails to load (for example, a
+  missing native library) was reported as "not installed", telling the
+  user to run an install command that was already satisfied and could
+  not help. The two failure modes are now distinguished: a genuinely
+  missing package keeps the install guidance, and a load failure
+  reports itself as one and surfaces the underlying loader error, which
+  names the thing the user can actually act on. The optional `ollama`
+  client had the same defect and is fixed the same way.
+- `capture_audio` never removed the WAV files it wrote to the system
+  temporary directory. An agent calling it repeatedly accumulated
+  recordings of the user's microphone there indefinitely.
+
+### Changed
+
+- WAV files written by `capture_audio` to the temporary directory are
+  now removed at server start once they are older than 24 hours. The
+  path returned by a call remains valid for the session and well
+  beyond it. The sweep matches only the exact file names the tool
+  generates, never touches anything else, and cannot fail or delay
+  startup. `voice_query` continues to delete its recording as soon as
+  the query completes.
+- The published package no longer carries a `scripts` block. The
+  package is built from a generated manifest holding an explicit
+  allowlist of consumer-facing fields, so development-only fields
+  cannot reach consumers. `npm test` in an installed copy now reports
+  a missing script instead of failing on a test file that is
+  deliberately not shipped. The pre-publish gate fails the release if
+  the published manifest carries `scripts` or `devDependencies`. The
+  tarball's runtime contents are unchanged.
+- Documentation brought current: the argument validation introduced in
+  0.3.0 is documented, the whisper model section no longer implies the
+  model downloads itself, Known Limitations describes the temp-file
+  retention, a troubleshooting entry covers the addon load-failure
+  message, and the security policy's supported-versions table reflects
+  the 0.3+ line.
+
+### Added
+
+- Deterministic test coverage, on every platform, for paths the smoke
+  suite could not previously reach: the optional-dependency load
+  failures in the transcription and LLM layers (stubbed at the module
+  loader, so no whisper model or Ollama daemon is needed), the
+  temp-directory sweep, and the packed manifest (builds and packs the
+  real tarball, asserts the source manifest is never modified, and
+  asserts an installed copy's `npm test` cannot fail on a module that
+  was never shipped).
+
 ## [0.3.0] - 2026-07-14
 
 ### Changed
@@ -200,7 +251,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/decibri/mcp-listen/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/decibri/mcp-listen/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/decibri/mcp-listen/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/decibri/mcp-listen/compare/v0.1.3...v0.2.0

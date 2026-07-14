@@ -9,6 +9,7 @@ const { version } = require('./package.json');
 const { listDevices, captureAudio, getActiveMic } = require('./lib/audio');
 const { transcribe } = require('./lib/transcribe');
 const { chat } = require('./lib/llm');
+const { sweepStaleRecordings } = require('./lib/cleanup');
 const {
   validateListDevicesArgs,
   validateCaptureArgs,
@@ -220,6 +221,10 @@ process.on('SIGTERM', shutdown);
 // ── Start ──────────────���────────────────────────────────────
 
 (async () => {
+  // Not awaited: the sweep is best-effort housekeeping and must never
+  // delay or prevent the server coming up.
+  sweepStaleRecordings();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('mcp-listen server started');

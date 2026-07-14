@@ -116,14 +116,30 @@ jobs:
       - name: Run smoke tests
         run: npm test
 
+      - name: Build the publish package
+        # The package is published from the generated dist/ directory, not
+        # from the repo root: scripts/build-package.js writes a manifest
+        # containing only an explicit allowlist of consumer-facing fields
+        # (no scripts, no devDependencies) and copies the runtime files in.
+        # The source package.json is read, never written.
+        run: node scripts/build-package.js
+
       - name: Verify npm package contents (pre-publish gate)
         # Defense-in-depth: verify npm package contents before any publish.
-        # Runs in both publish and dry-run modes. The forbidden patterns exist
-        # because the maintainer working tree holds gitignored registry
-        # credentials (.mcpregistry_*), a publisher binary (mcp-publisher.exe),
-        # and a local runbook (CLAUDE.local.md); this gate stops them ever
-        # reaching a tarball if .gitignore or the package.json `files` list
-        # slips.
+        # Runs in both publish and dry-run modes, against the generated
+        # dist/ directory that actually gets published. The forbidden
+        # patterns exist because the maintainer working tree holds
+        # gitignored registry credentials (.mcpregistry_*), a publisher
+        # binary (mcp-publisher.exe), and a local runbook (CLAUDE.local.md);
+        # this gate stops them ever reaching a tarball if .gitignore or the
+        # build script slips.
+        #
+        # The manifest checks are the field-level equivalent of the file
+        # checks: the published manifest is generated from an allowlist,
+        # and this gate fails the release if a development-only field
+        # (scripts, devDependencies) appears in it anyway. jq reads
+        # dist/package.json directly because `npm pack --dry-run --json`
+        # reports the file list, not the manifest contents.
         #
         # The shape check is not paranoia. npm 10 emitted an array of packed-
         # package records from `npm pack --dry-run --json`; npm 12 emits an
@@ -138,7 +154,7 @@ jobs:
           set -o pipefail
           FAIL=0
 
-          PACK_JSON=$(npm pack --dry-run --json)
+          PACK_JSON=$(npm pack --dry-run --json ./dist)
           echo "Raw npm pack output:"
           echo "$PACK_JSON"
           echo ""
@@ -165,6 +181,7 @@ jobs:
             package.json \
             index.js \
             lib/audio.js \
+            lib/cleanup.js \
             lib/llm.js \
             lib/transcribe.js \
             lib/validate.js \
@@ -190,6 +207,19 @@ jobs:
               FAIL=1
             else
               echo "  [OK]   forbidden absent: $p"
+            fi
+          done
+
+          echo ""
+          echo "Published manifest (dist/package.json) field checks:"
+          for field in scripts devDependencies
+          do
+            if jq -e --arg f "$field" 'has($f)' dist/package.json > /dev/null; then
+              echo "  [FAIL] published manifest must not carry: $field"
+              echo "         got: $(jq -c --arg f "$field" '.[$f]' dist/package.json)"
+              FAIL=1
+            else
+              echo "  [OK]   manifest field absent: $field"
             fi
           done
 
@@ -255,14 +285,23 @@ jobs:
           fi
           echo "OK: npm ${NPM_VERSION} supports trusted publishing"
 
+      - name: Build the publish package
+        # Same generated dist/ the verify job gated: the published manifest
+        # is built from an explicit field allowlist (no scripts, no
+        # devDependencies) and the runtime files are copied in. The build
+        # needs no npm install; scripts/build-package.js uses only node:fs.
+        run: node scripts/build-package.js
+
       # npm Trusted Publishing (OIDC) supplies auth automatically given
       # `id-token: write` and the registered trusted publisher record. No
       # NODE_AUTH_TOKEN is used, and no --provenance flag is passed:
       # provenance is generated automatically from the OIDC token. The
       # publish is gated on either a tag-push trigger or a
-      # workflow_dispatch run with `publish: true`.
+      # workflow_dispatch run with `publish: true`. Published from the
+      # generated dist/ directory (cd, matching the decibri publish
+      # workflows), never from the repo root.
       - name: Publish mcp-listen
-        run: npm publish --access public
+        run: cd dist && npm publish --access public
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
