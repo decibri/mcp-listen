@@ -20,30 +20,30 @@ function log(status, name) {
   console.log(`  ${symbol}  ${name}`);
 }
 
-// Capture 500ms through the server with the given extra arguments and assert
-// the WAV is byte-exact for the tool's fixed output format. Returns the file
-// size. Used by the by-index and by-id device selection tests; the main
+// Capture through the server with the given extra arguments and assert the
+// WAV is byte-exact for the tool's fixed output format at the requested
+// duration (default 500ms). Returns the file size. Used by the by-index and
+// by-id device selection tests and the fixed-path duration checks; the main
 // capture test (test 4) keeps its own full set of header assertions.
-async function captureExact(server, extraArgs) {
-  const DURATION_MS = 500;
+async function captureExact(server, extraArgs, durationMs = 500) {
   const SAMPLE_RATE = 16000;
   const CHANNELS = 1;
   const BIT_DEPTH = 16;
   const WAV_HEADER_BYTES = 44;
   const expectedPcmBytes =
-    Math.round((DURATION_MS * SAMPLE_RATE) / 1000) * CHANNELS * (BIT_DEPTH / 8);
+    Math.round((durationMs * SAMPLE_RATE) / 1000) * CHANNELS * (BIT_DEPTH / 8);
   const expectedSize = WAV_HEADER_BYTES + expectedPcmBytes;
 
   const res = await server.send('tools/call', {
     name: 'capture_audio',
-    arguments: { duration_ms: DURATION_MS, ...extraArgs }
+    arguments: { duration_ms: durationMs, ...extraArgs }
   });
   if (res.result.isError) throw new Error(res.result.content[0].text);
   const data = JSON.parse(res.result.content[0].text);
   const stat = fs.statSync(data.path);
   try { fs.unlinkSync(data.path); } catch {}
   if (stat.size !== expectedSize) {
-    throw new Error(`Expected exactly ${expectedSize} bytes for ${DURATION_MS}ms, got ${stat.size}`);
+    throw new Error(`Expected exactly ${expectedSize} bytes for ${durationMs}ms, got ${stat.size}`);
   }
   return stat.size;
 }
@@ -74,13 +74,13 @@ function startServer() {
     }
   });
 
-  function send(method, params = {}) {
+  function send(method, params = {}, timeoutMs = RESPONSE_TIMEOUT) {
     const id = ++msgId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`Timeout waiting for response to ${method}`));
-      }, RESPONSE_TIMEOUT);
+      }, timeoutMs);
       pending.set(id, { resolve, timer });
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     });
@@ -147,6 +147,16 @@ async function run() {
       }
       if (!Array.isArray(schema.required)) {
         throw new Error(`${tool.name}: inputSchema must declare an explicit required array`);
+      }
+      // The silence-stopped mode is part of the advertised contract on both
+      // capture tools; a schema that stops declaring it would silently
+      // remove the capability from every schema-reading client.
+      if (tool.name === 'capture_audio' || tool.name === 'voice_query') {
+        for (const key of ['stop_on_silence', 'silence_ms']) {
+          if (!schema.properties || !schema.properties[key]) {
+            throw new Error(`${tool.name}: inputSchema must declare ${key}`);
+          }
+        }
       }
     }
     log('pass', 'All 3 tools advertised with strict input schemas');
@@ -263,7 +273,18 @@ async function run() {
         if (!text.includes('list_audio_devices')) {
           throw new Error(`Error must point at list_audio_devices, got: ${text}`);
         }
-        log('pass', 'default capture returns actionable error (no default device)');
+        // The silence-stopped mode must hit the same guards in the same
+        // order: a machine with no usable default refuses before any VAD
+        // model is loaded, with the same actionable error.
+        const silenceRes = await server.send('tools/call', {
+          name: 'capture_audio',
+          arguments: { duration_ms: DURATION_MS, stop_on_silence: true }
+        });
+        if (!silenceRes.result.isError ||
+            !silenceRes.result.content[0].text.includes('no usable default input device')) {
+          throw new Error(`silence-stopped capture must be refused identically, got: ${silenceRes.result.content[0].text}`);
+        }
+        log('pass', 'default capture returns actionable error (no default device, both modes)');
       } else {
         const data = JSON.parse(res.result.content[0].text);
         const stat = fs.statSync(data.path);
@@ -280,6 +301,84 @@ async function run() {
     }
   } else {
     log('skip', 'capture_audio (no microphone available)');
+    skipped++;
+  }
+
+  // Fixed path at a second duration: 2000ms must be byte-exact too. Two
+  // points pin the arithmetic as linear in the duration; a single duration
+  // could pass with a compensating constant error.
+  if (hasDevices && deviceList.some((d) => d.isDefault)) {
+    try {
+      const size = await captureExact(server, {}, 2000);
+      log('pass', `capture_audio 2000ms fixed path is byte-exact (${size} bytes)`);
+      passed++;
+    } catch (err) {
+      log('fail', `capture_audio 2000ms fixed path: ${err.message}`);
+      failed++;
+    }
+  } else {
+    log('skip', 'capture_audio 2000ms fixed path (no default device)');
+    skipped++;
+  }
+
+  // Live silence-stopped capture. The stop logic itself is pinned
+  // deterministically by test/stub-vad-timeline.js; what only a live run
+  // can prove is the native stack under it: the bundled ONNX Runtime
+  // loads, the Silero model loads, and inference runs on real captured
+  // audio. The terminal state depends on the room: a silent machine (and
+  // the virtual device on a bare runner) ends at the 10s no-speech
+  // backstop, byte-exact; ambient speech ends it at 'silence' or
+  // 'ceiling'. Every branch must satisfy the same exact size/header
+  // relations; the no-speech branch is additionally byte-exact at 320044.
+  if (hasDevices && deviceList.some((d) => d.isDefault)) {
+    try {
+      const res = await server.send('tools/call', {
+        name: 'capture_audio',
+        arguments: { duration_ms: 12000, stop_on_silence: true }
+      }, 25000);
+      if (res.result.isError) throw new Error(res.result.content[0].text);
+      const data = JSON.parse(res.result.content[0].text);
+      if (!['silence', 'ceiling', 'no_speech_timeout'].includes(data.stopped_by)) {
+        throw new Error(`unexpected stopped_by: ${data.stopped_by}`);
+      }
+      if (typeof data.speech_detected !== 'boolean') {
+        throw new Error(`speech_detected must be a boolean, got ${JSON.stringify(data.speech_detected)}`);
+      }
+      const stat = fs.statSync(data.path);
+      // 32 bytes per millisecond at 16kHz 16-bit mono; payloads are whole
+      // chunks (or the trimmed ceiling), so the relation is exact.
+      const expectedSize = 44 + data.duration_ms * 32;
+      if (stat.size !== expectedSize) {
+        throw new Error(`size must be exactly 44 + duration_ms*32 = ${expectedSize}, got ${stat.size}`);
+      }
+      if (data.size_bytes !== stat.size) {
+        throw new Error(`size_bytes ${data.size_bytes} != file size ${stat.size}`);
+      }
+      const header = Buffer.alloc(44);
+      const fd = fs.openSync(data.path, 'r');
+      fs.readSync(fd, header, 0, 44, 0);
+      fs.closeSync(fd);
+      if (header.readUInt16LE(22) !== 1) throw new Error('header channels != 1');
+      if (header.readUInt32LE(24) !== 16000) throw new Error('header sample rate != 16000');
+      if (header.readUInt16LE(34) !== 16) throw new Error('header bit depth != 16');
+      if (header.readUInt32LE(40) !== stat.size - 44) {
+        throw new Error(`header data size ${header.readUInt32LE(40)} != payload ${stat.size - 44}`);
+      }
+      try { fs.unlinkSync(data.path); } catch {}
+      if (data.stopped_by === 'no_speech_timeout') {
+        if (data.speech_detected !== false) throw new Error('no-speech stop must report speech_detected: false');
+        if (data.duration_ms !== 10000 || stat.size !== 320044) {
+          throw new Error(`no-speech stop must be byte-exact at 10000ms/320044, got ${data.duration_ms}ms/${stat.size}`);
+        }
+      }
+      log('pass', `silence-stopped capture live (${data.stopped_by}, ${stat.size} bytes, speech: ${data.speech_detected})`);
+      passed++;
+    } catch (err) {
+      log('fail', `silence-stopped capture live: ${err.message}`);
+      failed++;
+    }
+  } else {
+    log('skip', 'silence-stopped capture live (no default device)');
     skipped++;
   }
 
@@ -542,6 +641,45 @@ async function run() {
     failed++;
   }
 
+  // capture_audio rejects malformed stop_on_silence and silence_ms before
+  // anything is opened or written, with the same actionable-message
+  // contract as every other argument. The cross-field cases matter most: a
+  // silence_ms that cannot take effect is rejected, not silently ignored,
+  // for the same reason unknown keys are.
+  try {
+    const before = tmpWavs();
+    const cases = [
+      { args: { stop_on_silence: 'yes' }, expect: 'stop_on_silence must be a boolean' },
+      { args: { stop_on_silence: 1 }, expect: 'stop_on_silence must be a boolean' },
+      { args: { stop_on_silence: {} }, expect: 'stop_on_silence must be a boolean' },
+      { args: { stop_on_silence: true, silence_ms: '500' }, expect: 'silence_ms must be a number' },
+      { args: { stop_on_silence: true, silence_ms: 500.5 }, expect: 'silence_ms must be an integer' },
+      { args: { stop_on_silence: true, silence_ms: 50 }, expect: 'silence_ms must be between 100 and 10000' },
+      { args: { stop_on_silence: true, silence_ms: 20000 }, expect: 'silence_ms must be between 100 and 10000' },
+      { args: { silence_ms: 500 }, expect: 'silence_ms requires stop_on_silence: true' },
+      { args: { stop_on_silence: false, silence_ms: 500 }, expect: 'silence_ms requires stop_on_silence: true' }
+    ];
+    for (const c of cases) {
+      const res = await server.send('tools/call', { name: 'capture_audio', arguments: c.args });
+      if (!res.result || !res.result.isError) {
+        throw new Error(`expected isError for ${JSON.stringify(c.args)}`);
+      }
+      const text = res.result.content[0].text;
+      if (!text.includes(c.expect)) {
+        throw new Error(`expected "${c.expect}" for ${JSON.stringify(c.args)}, got: ${text}`);
+      }
+    }
+    const after = tmpWavs();
+    if (after.length > before.length) {
+      throw new Error(`rejected calls wrote to disk: ${after.filter((f) => !before.includes(f))}`);
+    }
+    log('pass', `capture_audio rejects malformed stop_on_silence/silence_ms (${cases.length} cases, nothing written)`);
+    passed++;
+  } catch (err) {
+    log('fail', `malformed stop_on_silence/silence_ms: ${err.message}`);
+    failed++;
+  }
+
   // Test 18: voice_query validates every argument before capture starts.
   // These messages can only come from the validator: the old path either
   // recorded first or surfaced a transcribe/LLM error, never a type error
@@ -554,7 +692,12 @@ async function run() {
       { args: { model: {} }, expect: 'model must be a string' },
       { args: { prompt: false }, expect: 'prompt must be a string' },
       { args: { duration_ms: '5000' }, expect: 'duration_ms must be a number' },
-      { args: { device: {} }, expect: 'device must be a number (device index) or a string (device id)' }
+      { args: { device: {} }, expect: 'device must be a number (device index) or a string (device id)' },
+      { args: { stop_on_silence: 'yes' }, expect: 'stop_on_silence must be a boolean' },
+      // voice_query stops on silence by default, so a bare silence_ms is
+      // valid there; only the explicit opt-out makes it a dead knob.
+      { args: { stop_on_silence: false, silence_ms: 500 }, expect: 'silence_ms has no effect when stop_on_silence is false' },
+      { args: { silence_ms: 99 }, expect: 'silence_ms must be between 100 and 10000' }
     ];
     for (const c of cases) {
       const res = await server.send('tools/call', { name: 'voice_query', arguments: c.args });
@@ -584,8 +727,8 @@ async function run() {
   try {
     const cases = [
       { name: 'list_audio_devices', args: { foo: 1 }, key: 'foo', accepted: 'none' },
-      { name: 'capture_audio', args: { output_path: 'x.wav' }, key: 'output_path', accepted: 'duration_ms, device' },
-      { name: 'voice_query', args: { extra: true }, key: 'extra', accepted: 'duration_ms, device, whisper_model, language, model, prompt' }
+      { name: 'capture_audio', args: { output_path: 'x.wav' }, key: 'output_path', accepted: 'duration_ms, device, stop_on_silence, silence_ms' },
+      { name: 'voice_query', args: { extra: true }, key: 'extra', accepted: 'duration_ms, device, stop_on_silence, silence_ms, whisper_model, language, model, prompt' }
     ];
     for (const c of cases) {
       const res = await server.send('tools/call', { name: c.name, arguments: c.args });
@@ -624,6 +767,20 @@ async function run() {
     expectError(validateCaptureArgs({ device: NaN }), 'device index must be a non-negative integer', 'NaN device');
     expectError(validateCaptureArgs({ device: Infinity }), 'device index must be a non-negative integer', 'Infinity device');
     expectError(validateVoiceQueryArgs({ whisper_model: NaN }), 'whisper_model must be a string', 'NaN whisper_model');
+    expectError(validateCaptureArgs({ stop_on_silence: true, silence_ms: NaN }), 'silence_ms must be a finite number', 'NaN silence_ms');
+    expectError(validateCaptureArgs({ stop_on_silence: true, silence_ms: Infinity }), 'silence_ms must be a finite number', 'Infinity silence_ms');
+
+    // Valid silence-mode arguments pass through unchanged, and a bare
+    // silence_ms is legal for voice_query (silence-stopped is its default)
+    // while illegal for capture_audio (checked over the wire above).
+    const silenceValid = validateCaptureArgs({ duration_ms: 500, stop_on_silence: true, silence_ms: 800 });
+    if (silenceValid.error || silenceValid.stopOnSilence !== true || silenceValid.silenceMs !== 800) {
+      throw new Error('valid silence-mode arguments must pass through unchanged');
+    }
+    const vqSilence = validateVoiceQueryArgs({ silence_ms: 800 });
+    if (vqSilence.error || vqSilence.silenceMs !== 800 || vqSilence.stopOnSilence !== undefined) {
+      throw new Error('voice_query must accept silence_ms without stop_on_silence');
+    }
 
     // Absent means the documented default: null and undefined normalize
     // identically, and valid values pass through unchanged.
@@ -645,15 +802,20 @@ async function run() {
 
   server.kill();
 
-  // Tests 21-23: deterministic child-process suites, valid on every
-  // platform with no whisper model, no Ollama, and no microphone:
-  // the optional-dependency load failures (not-installed vs installed-
-  // but-broken must produce different, actionable messages), the startup
-  // temp-file sweep (removes only stale recordings this tool created),
-  // and the packed manifest (the published package carries no test
-  // script, so npm test in an installed copy cannot fail on a module
-  // that was never shipped).
-  for (const script of ['stub-loader-errors.js', 'temp-sweep.js', 'packed-manifest.js']) {
+  // Deterministic child-process suites, valid on every platform with no
+  // whisper model, no Ollama, and no microphone: the optional-dependency
+  // load failures (not-installed vs installed-but-broken must produce
+  // different, actionable messages), the startup temp-file sweep (removes
+  // only stale recordings this tool created), the packed manifest (the
+  // published package carries no test script, so npm test in an installed
+  // copy cannot fail on a module that was never shipped), and the
+  // silence-stopped capture timelines (the entire stop state machine
+  // against scripted VAD scores, byte-exact; the only coverage of that
+  // logic that exists on a machine with no microphone, which includes
+  // every CI runner); and the voice_query no-answer contract (the five-way
+  // decomposition and the filler-detection fix, proving a filler-only
+  // transcription never reaches the LLM).
+  for (const script of ['stub-loader-errors.js', 'temp-sweep.js', 'packed-manifest.js', 'stub-vad-timeline.js', 'stub-voicequery-contract.js']) {
     try {
       const suite = spawnSync(process.execPath, [path.join(__dirname, script)],
         { encoding: 'utf8', timeout: 240000 });

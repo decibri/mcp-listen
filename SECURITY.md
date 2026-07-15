@@ -81,8 +81,8 @@ This security policy applies to the following versions:
 
 | Version | Supported |
 | --- | --- |
-| 0.4.x | Yes |
-| < 0.4 | No |
+| 0.5.x | Yes |
+| < 0.5 | No |
 
 Security fixes are applied to the latest release only. mcp-listen is pre-1.0 and older versions are not backported. Upgrade to the latest release.
 
