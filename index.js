@@ -176,6 +176,26 @@ function hasUsableWords(text) {
   return /[\p{L}\p{N}]/u.test(withoutMarkers);
 }
 
+// The fixed capture-conditioning chain applied to voice_query's audio before
+// whisper transcribes it. voice_query's only consumer is speech-to-text, which
+// reads better from a de-rumbled, leveled signal, and the conditioned WAV is
+// the one voice_query already deletes after transcribing, so no caller ever
+// observes it. These four stages are all sample-in-sample-out with zero added
+// latency in decibri, so they change neither the captured sample count, the
+// sample rate, nor the silence-stop timing (Silero reads the pre-enhancement
+// signal). Denoise is deliberately absent: it is the one stage that adds
+// latency, and decibri's own measurements show it degrades already-clean
+// speech, so it could only hurt transcription for a user in a quiet room.
+// capture_audio applies none of this; its contract is the raw microphone
+// signal. Frozen so the set cannot be mutated in place at runtime. Option
+// names and value ranges are decibri@5.0.0's MicrophoneOptions.
+const VOICE_QUERY_CONDITIONING = Object.freeze({
+  dcRemoval: true, // one-pole DC blocker (~13 Hz): remove any constant offset
+  highpass: 80,    // 80 Hz Butterworth: cut sub-voice rumble, below male F0
+  agc: -18,        // target -18 dBFS: quiet capture is the classic whisper killer
+  limiter: -1.0    // -1 dBFS ceiling: catch a peak the AGC gain would let clip
+});
+
 // Takes the validated, normalized values from validateVoiceQueryArgs,
 // never the raw request arguments.
 async function voiceQuery(v) {
@@ -191,12 +211,14 @@ async function voiceQuery(v) {
     ? v.durationMs
     : (stopOnSilence ? 15000 : undefined);
 
-  // Step 1: Capture audio
+  // Step 1: Capture audio, conditioned for transcription (the raw capture_audio
+  // tool passes no conditioning, so only the query path is enhanced).
   const captureResult = await captureAudio({
     durationMs,
     device: v.device,
     stopOnSilence,
-    silenceMs: v.silenceMs
+    silenceMs: v.silenceMs,
+    conditioning: VOICE_QUERY_CONDITIONING
   });
 
   if (captureResult.isError) return captureResult;
