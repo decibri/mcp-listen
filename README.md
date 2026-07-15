@@ -21,9 +21,11 @@ Microphone capture and speech-to-text tools for MCP-compatible agents.
     <tr>
       <td><strong>Meta</strong></td>
       <td>
+        <a href="https://github.com/decibri/mcp-listen"><img src="https://badge.mcpx.dev?type=server" title="MCP Server" alt="MCP Server" /></a>&nbsp;
         <a href="https://www.npmjs.com/package/mcp-listen"><img src="https://img.shields.io/npm/v/mcp-listen" alt="npm version"></a>&nbsp;
         <a href="https://github.com/decibri/mcp-listen/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="Apache 2.0 License"></a>&nbsp;
         <a href="https://github.com/decibri/mcp-listen/actions/workflows/ci.yml"><img src="https://github.com/decibri/mcp-listen/actions/workflows/ci.yml/badge.svg" alt="CI"></a>&nbsp;
+        <a href="https://glama.ai/mcp/servers/decibri/mcp-listen"><img src="https://glama.ai/mcp/servers/decibri/mcp-listen/badges/score.svg" alt="mcp-listen MCP server" /></a>&nbsp;
       </td>
     </tr>
   </table>
