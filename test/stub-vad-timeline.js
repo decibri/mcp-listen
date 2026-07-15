@@ -322,6 +322,12 @@ function repeat(score, n) {
   const fixed = await captureAudio({ durationMs: 500, outputPath: fixedPath });
   assert(!fixed.isError, `fixed: capture must succeed, got: ${fixed.content[0].text}`);
   assert.strictEqual(current.lastOptions.vad, undefined, 'fixed: no vad option may be passed');
+  // The raw capture_audio path must set no conditioning, ever: its byte-exact
+  // contract depends on the recording being byte-identical to the device
+  // stream. This is the guard that keeps that contract meaningful.
+  for (const key of ['dcRemoval', 'denoise', 'highpass', 'agc', 'limiter']) {
+    assert.strictEqual(current.lastOptions[key], undefined, `fixed: ${key} must not be set on the raw capture path`);
+  }
   const fixedData = JSON.parse(fixed.content[0].text);
   assert.deepStrictEqual(Object.keys(fixedData),
     ['path', 'duration_ms', 'sample_rate', 'channels', 'size_bytes'],
@@ -330,6 +336,42 @@ function repeat(score, n) {
   try { fs.unlinkSync(fixedPath); } catch {}
   assert.strictEqual(fixedStat.size, 16044, `fixed: expected byte-exact 16044, got ${fixedStat.size}`);
   console.log('OK fixed-mode-unchanged (16044 bytes)');
+
+  // 12. Conditioning does not change the silence-stop decision. Silero reads
+  // decibri's pre-enhancement tap, so the stop chunk is identical whether the
+  // conditioning chain is on or off. This runs scenario 1's exact timeline
+  // (which stops at chunk 26 = 83244 bytes) with the voice_query conditioning
+  // set applied, and asserts the identical terminal state. It also pins that
+  // the conditioning options reach the decibri constructor alongside vad, and
+  // that only the recommended set is requested (denoise stays off). The fake
+  // delivers the same fixed chunks regardless of these options, so an
+  // unchanged byte count is exactly the "VAD unaffected" proof.
+  current.scores = [...repeat(0.1, 5), ...repeat(0.9, 10), ...repeat(0.05, 40)];
+  current.lastOptions = null;
+  const condPath = path.join(os.tmpdir(), `mcp-listen-vadstub-${process.pid}-conditioned.wav`);
+  const conditioned = await captureAudio({
+    durationMs: 10000,
+    stopOnSilence: true,
+    silenceMs: 1000,
+    outputPath: condPath,
+    conditioning: { dcRemoval: true, highpass: 80, agc: -18, limiter: -1.0 }
+  });
+  assert(!conditioned.isError, `conditioned: capture must succeed, got: ${conditioned.isError ? conditioned.content[0].text : 'ok'}`);
+  // Both VAD and the full conditioning chain reach the constructor.
+  assert.strictEqual(current.lastOptions.vad, 'silero', 'conditioned: vad must still be requested');
+  assert.strictEqual(current.lastOptions.dcRemoval, true, 'conditioned: dcRemoval must be threaded through');
+  assert.strictEqual(current.lastOptions.highpass, 80, 'conditioned: highpass must be threaded through');
+  assert.strictEqual(current.lastOptions.agc, -18, 'conditioned: agc must be threaded through');
+  assert.strictEqual(current.lastOptions.limiter, -1.0, 'conditioned: limiter must be threaded through');
+  assert.strictEqual(current.lastOptions.denoise, undefined, 'conditioned: denoise must stay off');
+  const condData = JSON.parse(conditioned.content[0].text);
+  assert.strictEqual(condData.stopped_by, 'silence', 'conditioned: must stop on silence like the unconditioned run');
+  assert.strictEqual(condData.speech_detected, true, 'conditioned: speech_detected');
+  const condStat = fs.statSync(condPath);
+  try { fs.unlinkSync(condPath); } catch {}
+  assert.strictEqual(condStat.size, 83244,
+    `conditioned: stop must be byte-identical to the unconditioned scenario 1 (26 chunks, 83244), got ${condStat.size}`);
+  console.log('OK conditioning-preserves-silence-stop (83244 bytes, VAD unaffected)');
 
   // 11. voice_query's no-speech result, deterministically. voice_query lives
   // in index.js and its capture step runs through the same stubbed decibri,
@@ -372,6 +414,18 @@ function repeat(score, n) {
   // The prose message is a human hint, not the contract; assert only that one
   // exists, never its wording.
   assert.strictEqual(typeof vqData.message, 'string', 'voice_query: a human message should exist');
+
+  // voice_query conditions its capture. current.lastOptions still reflects that
+  // capture (nothing recorded since), so the exact recommended set must be what
+  // reached the decibri constructor: a future accidental change (denoise
+  // flipped on, the AGC target moved) fails here. Literal values are asserted,
+  // not a shared constant, so the intended set is pinned independently.
+  assert.strictEqual(current.lastOptions.dcRemoval, true, 'voice_query: dcRemoval must be true');
+  assert.strictEqual(current.lastOptions.highpass, 80, 'voice_query: highpass must be 80');
+  assert.strictEqual(current.lastOptions.agc, -18, 'voice_query: agc must be -18');
+  assert.strictEqual(current.lastOptions.limiter, -1.0, 'voice_query: limiter must be -1.0');
+  assert.strictEqual(current.lastOptions.denoise, undefined, 'voice_query: denoise must be off');
+  assert.strictEqual(current.lastOptions.vad, 'silero', 'voice_query: stops on silence by default');
   console.log('OK voicequery-no-speech-aligned');
 
   console.log('OK vad-timeline');
