@@ -1,6 +1,6 @@
 {
   "name": "mcp-listen",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Give your AI agents the ability to listen. Microphone capture and speech-to-text tools for MCP-compatible agents.",
   "mcpName": "io.github.decibri/mcp-listen",
   "main": "index.js",
