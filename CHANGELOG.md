@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-15
+
+### Added
+
+- Silence-stopped capture. `capture_audio` gains `stop_on_silence`
+  (default `false`): when set, the recording ends when the speaker stops
+  talking, detected with the Silero voice-activity model that ships
+  inside decibri and runs on-device through its bundled ONNX Runtime, so
+  nothing extra is downloaded and no audio leaves the machine. In that
+  mode `duration_ms` becomes a maximum rather than an exact length, and
+  the new `silence_ms` argument (default 1000, range 100-10000) sets how
+  much continuous silence ends the recording. Recording ends at the
+  first of: `silence_ms` of continuous post-speech silence, the
+  `duration_ms` ceiling, or 10 seconds with no speech at all. The result
+  reports the actual captured `duration_ms`, which condition ended it
+  (`stopped_by`), and whether speech was heard (`speech_detected`).
+  Every stop condition is measured in delivered audio, never wall-clock
+  timers, so the stop point is an exact function of the audio; the
+  detector only decides when to stop and never alters the recorded
+  samples, and a fixed-duration capture is unchanged byte for byte.
+- `voice_query` stops on silence by default, with a 15 second ceiling.
+  Its only consumer is speech transcription and a spoken query has no
+  known length, so the previous fixed window truncated long questions
+  and recorded silence after short ones. `stop_on_silence: false`
+  restores the previous fixed 5 second window exactly.
+- Deterministic test suites, runnable on every platform with no
+  microphone, whisper, or Ollama: the silence-stop state machine
+  (scripted per-chunk scores pinning the exact stop chunk and byte count
+  for each stop condition) and the `voice_query` no-answer contract
+  (including that a filler-only transcription never reaches the model).
+
+### Changed
+
+- `voice_query`'s no-answer results are restructured, and a caller that
+  branched on the previous shapes will observe the change. No speech at
+  all, and speech that produced no usable words, are now non-error
+  results whose machine-readable contract is `speech_detected` (`false`
+  vs `true`) with `transcription: null`, so a caller distinguishes "the
+  user was silent" from "the user spoke but produced no words" without
+  parsing prose. Empty transcription previously returned `isError: true`
+  and no longer does. A transcription failure, an unreachable or erroring
+  Ollama, and an empty model response remain `isError: true`, each
+  surfacing its real cause. The rule is that a pipeline that ran and
+  found no words is a success, while a broken dependency is an error.
+  The structured fields are the contract; any human-readable message is
+  not, so callers branch on the fields rather than the prose.
+
+### Fixed
+
+- Whisper's non-speech markers no longer reach the language model. When
+  a recording contained silence or noise, whisper returns markers such
+  as `[BLANK_AUDIO]`, `[MUSIC]`, or `(silence)` as ordinary text, and
+  these were forwarded to Ollama as the user's query, so the model
+  answered a question the user never asked. A transcription is now
+  treated as having usable words only if, after removing every bracketed
+  and parenthesised marker, at least one letter or digit remains, so a
+  marker-only or whitespace-only transcription is reported as no words
+  and never reaches the model. The check is conservative: a real
+  transcription that merely contains a bracketed word keeps its words
+  and is unaffected.
+
 ## [0.4.0] - 2026-07-14
 
 ### Fixed
@@ -251,7 +312,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/decibri/mcp-listen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/decibri/mcp-listen/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/decibri/mcp-listen/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/decibri/mcp-listen/compare/v0.2.0...v0.2.1
