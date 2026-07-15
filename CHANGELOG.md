@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-15
+
+### Added
+
+- `voice_query` now conditions its audio before transcription: DC
+  removal, an 80 Hz high-pass, AGC to -18 dBFS, and a -1 dBFS limiter.
+  These improve transcription without changing the captured sample
+  count, the sample rate, or the silence-stop behaviour. `capture_audio`
+  is unaffected and still returns the raw microphone signal. Denoise is
+  deliberately not applied.
+
 ## [0.5.0] - 2026-07-15
 
 ### Added
@@ -312,7 +323,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/decibri/mcp-listen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/decibri/mcp-listen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/decibri/mcp-listen/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/decibri/mcp-listen/compare/v0.2.1...v0.3.0
