@@ -7,6 +7,10 @@ updates:
     open-pull-requests-limit: 5
     groups:
       npm-deps:
+        applies-to: version-updates
+        patterns: ["*"]
+      npm-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   - package-ecosystem: github-actions
@@ -16,4 +20,8 @@ updates:
     open-pull-requests-limit: 5
     groups:
       github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
+      github-actions-security:
+        applies-to: security-updates
         patterns: ["*"]
