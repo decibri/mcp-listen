@@ -38,7 +38,7 @@ Microphone capture and speech-to-text tools for MCP-compatible agents.
 | ------ | ------------- |
 | `list_audio_devices` | List available microphone input devices |
 | `capture_audio` | Record audio from the microphone and save as WAV |
-| `voice_query` | Capture, transcribe (whisper.cpp), and query a local LLM (Ollama) |
+| `voice_query` | Capture, transcribe on this machine (whisper.cpp), and query a model through the local Ollama daemon |
 
 ## Quick Start
 
@@ -155,7 +155,7 @@ With `stop_on_silence`, `duration_ms` in the response is the actual captured len
 
 ### voice_query
 
-Full voice pipeline: capture audio, transcribe with whisper.cpp, send to Ollama, return the response. Entirely offline. Recording stops automatically when the speaker stops talking; pass `stop_on_silence: false` for a fixed-length recording.
+Full voice pipeline: capture audio, transcribe it on this machine with whisper.cpp, send the transcription to the local Ollama daemon, and return the transcription and the response. The audio stays on this machine. Recording stops automatically when the speaker stops talking; pass `stop_on_silence: false` for a fixed-length recording.
 
 **Parameters:**
 
@@ -226,7 +226,7 @@ Audio is captured as 16-bit PCM at 16kHz mono, the standard format for speech-to
 
 Silence-stopping uses the Silero voice activity detection model that ships inside decibri, running on-device through the bundled ONNX Runtime. Nothing extra is downloaded and no audio leaves the machine. The stop decision is measured in captured audio, not wall-clock time, and the VAD only decides when to stop: it never gates or alters the recorded samples.
 
-The `voice_query` tool runs the full pipeline locally: capture audio, transcribe with whisper.cpp, and send to a local Ollama LLM. Fully offline, nothing leaves your machine.
+The `voice_query` tool captures audio and transcribes it on this machine with whisper.cpp, sends the transcription to the local Ollama daemon, and returns the transcription and the response to the calling client. The audio stays on this machine.
 
 ## Whisper Model Setup
 

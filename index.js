@@ -30,12 +30,31 @@ const server = new Server(
 
 // ── Tool definitions ───────────���────────────────────────────
 
+// Each tool declares all four annotation hints as literal booleans. A
+// client applies the cautious spec default to a hint that is left out, and
+// a client that validates tools/list rejects a hint that is not a boolean.
+// The values state what each handler does:
+//   - list_audio_devices only reads the device list of this machine: read
+//     only, idempotent, and closed world.
+//   - capture_audio and voice_query write a new recording each time they
+//     record, and voice_query also sends the transcription to the Ollama
+//     daemon, so neither is read only or idempotent. Both are additive, not
+//     destructive: each recording goes to a new file (writeRecording in
+//     lib/audio.js), and voice_query deletes only the file it wrote. Both
+//     are open world: a microphone records whatever can be heard.
+// test/smoke.js pins all twelve values.
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'list_audio_devices',
       description: 'List available audio input devices (microphones) on this machine. Each device has a numeric index, a human-readable name, and a stable id. Prefer the id when selecting a device: indexes can shift when devices are added or removed, and names are not unique.',
-      inputSchema: { type: 'object', properties: {}, required: [], additionalProperties: false }
+      inputSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
     },
     {
       name: 'capture_audio',
@@ -62,11 +81,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: [],
         additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
       }
     },
     {
       name: 'voice_query',
-      description: 'Record audio from the microphone, transcribe speech to text using local whisper.cpp, send the transcription to a local Ollama LLM, and return the response. Recording stops automatically when the speaker stops talking. Fully offline.',
+      description: 'Record audio from the microphone, transcribe it on this machine with whisper.cpp, send the transcription to the local Ollama daemon, and return the transcription and the response. The audio stays on this machine. Recording stops automatically when the speaker stops talking.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -105,6 +130,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: [],
         additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
       }
     }
   ]
