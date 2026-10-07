@@ -105,8 +105,8 @@ Returns a JSON array of available audio input devices.
 
 ```json
 [
-  { "index": 0, "name": "Microphone", "id": "wasapi:{0.0.1.00000000}.{6b187949-26ea-470b-907d-66bf87261530}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": true },
-  { "index": 1, "name": "Microphone Array", "id": "wasapi:{0.0.1.00000000}.{b7a6e3e2-a62b-4e92-9320-947c4be98552}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": false }
+  { "index": 0, "name": "Microphone", "id": "wasapi:{0.0.1.00000000}.{00000000-0000-0000-0000-000000000001}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": true },
+  { "index": 1, "name": "Microphone Array", "id": "wasapi:{0.0.1.00000000}.{00000000-0000-0000-0000-000000000002}", "maxInputChannels": 2, "defaultSampleRate": 48000, "isDefault": false }
 ]
 ```
 
@@ -187,8 +187,8 @@ Full voice pipeline: capture audio, transcribe it on this machine with whisper.c
 | Normal | absent | (`true`/omitted) | the text | the answer |
 | No speech at all | absent | `false` | `null` | `null` |
 | Speech, but no transcribable words | absent | `true` | `null` | `null` |
-| Transcription step failed | `true` | — | — | — |
-| Ollama unavailable, errored, or empty | `true` | — | — | — |
+| Transcription step failed | `true` | absent | absent | absent |
+| Ollama unavailable, errored, or empty | `true` | absent | absent (the text if the reply is empty) | absent (`null` if the reply is empty) |
 
 A caller distinguishes "the user was silent" from "the user spoke but produced no words" by `speech_detected` (`false` vs `true`), both carrying `transcription: null`. Non-speech audio never reaches the language model: whisper's non-speech markers (`[BLANK_AUDIO]`, `[MUSIC]`, `(silence)`, and similar) are treated as no usable words rather than sent on as a query.
 

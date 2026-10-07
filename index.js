@@ -16,7 +16,7 @@ const {
   validateVoiceQueryArgs
 } = require('./lib/validate');
 
-// ── Server ─────────��───────────────────────��────────────────
+// ── Server ──────────────────────────────────────────────────
 
 // Tools only: no resources or resource templates are registered, and that
 // is load-bearing. The SDK's resources/read path has carried a ReDoS
@@ -28,7 +28,7 @@ const server = new Server(
   { capabilities: { tools: {} } }
 );
 
-// ── Tool definitions ───────────���────────────────────────────
+// ── Tool definitions ────────────────────────────────────────
 
 // Each tool declares all four annotation hints as literal booleans. A
 // client applies the cautious spec default to a hint that is left out, and
@@ -141,7 +141,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ]
 }));
 
-// ── Tool execution ─────────────────��────────────────────────
+// ── Tool execution ──────────────────────────────────────────
 
 // Arguments are validated before dispatch reaches any handler: the SDK
 // only checks that arguments is a record, so the schema's types and
@@ -397,7 +397,7 @@ async function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-// ── Start ──────────────���────────────────────────────────────
+// ── Start ───────────────────────────────────────────────────
 
 // Start the server only when run as the entry point (node index.js, or the
 // mcp-listen bin), not when required. Requiring this module in a test loads

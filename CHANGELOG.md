@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-07
+
+### Changed
+
+- The release workflow waits for npm to show the new version before it publishes to the MCP Registry. The workflow checks npm at intervals, and each interval is longer than the interval before it. If npm does not show the version in approximately five minutes, the workflow stops with an error.
+- You can run each publish step of the release workflow again. Each step first checks if its work is already done. If the work is done, the step writes a line in the log and does not do the work again. The step does not change an existing GitHub Release. If a check cannot get a clear answer, the step stops with an error.
+- The `list_audio_devices` example response in the README uses example device ids.
+- The `voice_query` outcomes table in the README shows a value in each cell.
+
 ## [0.7.0] - 2026-10-07
 
 ### Added
@@ -338,7 +347,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/decibri/mcp-listen/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/decibri/mcp-listen/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/decibri/mcp-listen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/decibri/mcp-listen/compare/v0.4.0...v0.5.0
