@@ -137,6 +137,16 @@ async function run() {
     if (JSON.stringify(names) !== JSON.stringify(expected)) {
       throw new Error(`Expected tools ${expected}, got ${names}`);
     }
+    // The annotation hints are part of the same contract: a client applies
+    // the spec default to a hint that is left out, and can use the values
+    // to decide how to present or confirm a call. Strict equality fails a
+    // missing hint, a non-boolean such as the string "true", and a changed
+    // value alike.
+    const EXPECTED_ANNOTATIONS = {
+      list_audio_devices: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      capture_audio: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      voice_query: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+    };
     for (const tool of res.result.tools) {
       const schema = tool.inputSchema;
       if (!schema || schema.type !== 'object') {
@@ -158,8 +168,14 @@ async function run() {
           }
         }
       }
+      const annotations = tool.annotations || {};
+      for (const [hint, value] of Object.entries(EXPECTED_ANNOTATIONS[tool.name])) {
+        if (annotations[hint] !== value) {
+          throw new Error(`${tool.name}: annotations.${hint} must be ${value}, got ${JSON.stringify(annotations[hint])}`);
+        }
+      }
     }
-    log('pass', 'All 3 tools advertised with strict input schemas');
+    log('pass', 'All 3 tools advertised with strict input schemas and annotations');
     passed++;
   } catch (err) {
     log('fail', `All 3 tools advertised: ${err.message}`);
@@ -814,8 +830,10 @@ async function run() {
   // logic that exists on a machine with no microphone, which includes
   // every CI runner); and the voice_query no-answer contract (the five-way
   // decomposition and the filler-detection fix, proving a filler-only
-  // transcription never reaches the LLM).
-  for (const script of ['stub-loader-errors.js', 'temp-sweep.js', 'packed-manifest.js', 'stub-vad-timeline.js', 'stub-voicequery-contract.js']) {
+  // transcription never reaches the LLM); and the recording name (a capture
+  // never replaces an existing file, and every name stays inside the
+  // sweep's pattern).
+  for (const script of ['stub-loader-errors.js', 'temp-sweep.js', 'packed-manifest.js', 'stub-vad-timeline.js', 'stub-voicequery-contract.js', 'stub-recording-name.js']) {
     try {
       const suite = spawnSync(process.execPath, [path.join(__dirname, script)],
         { encoding: 'utf8', timeout: 240000 });

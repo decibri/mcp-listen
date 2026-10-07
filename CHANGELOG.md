@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-07
+
+### Added
+
+- Each tool now declares the four MCP annotation hints. Each hint has a boolean value:
+  - `list_audio_devices`: `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`.
+  - `capture_audio`: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`.
+  - `voice_query`: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`.
+
+### Changed
+
+- Each recording goes to a new file, with a number in the name. If a file with that name exists, the server adds one to the number. A recording never replaces an existing file. If the first ten names are all in use, the tool returns an error and writes no file. Each name has the format `mcp-listen-<number>.wav`, so the cleanup at server start removes recordings that are older than 24 hours. `voice_query` deletes only the file that it wrote.
+- The `voice_query` description now shows where each step occurs. The tool transcribes the audio on this machine. It sends the transcription to the local Ollama daemon and returns the transcription and the response to the client. The audio stays on this machine.
+- The README now shows where the audio and the transcription go. The audio stays on this machine. The tool sends the transcription to the local Ollama daemon and to the client.
+
 ## [0.6.0] - 2026-07-15
 
 ### Added
@@ -323,7 +338,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/decibri/mcp-listen/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/decibri/mcp-listen/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/decibri/mcp-listen/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/decibri/mcp-listen/compare/v0.3.0...v0.4.0
