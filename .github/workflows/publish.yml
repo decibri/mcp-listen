@@ -329,28 +329,113 @@ jobs:
       # generated dist/ directory (cd, matching the decibri publish
       # workflows), never from the repo root.
       - name: Publish mcp-listen
-        run: cd dist && npm publish --access public
+        # A re-run of this job starts again at this step, and npm refuses to
+        # publish the same version twice. So the step first asks npm for this
+        # exact version and skips the publish when npm already has it. Only
+        # two answers count: the version itself, or a 404. Any other result
+        # fails the step, so an unreachable registry is never read as "not
+        # published" or as "already published".
+        #
+        # The check uses a new, empty npm cache. When the registry cannot be
+        # reached, npm answers from its cache if it has one, and a cached
+        # document without this version gives a 404 that the registry never
+        # sent.
+        shell: bash
+        run: |
+          cd dist
+          VERSION=$(node -p "require('./package.json').version")
+          CHECK_DIR=$(mktemp -d)
+          if FOUND=$(npm view "mcp-listen@${VERSION}" version --prefer-online \
+              --cache "${CHECK_DIR}/cache" 2> "${CHECK_DIR}/stderr"); then
+            STATUS=0
+          else
+            STATUS=$?
+          fi
+          if [ "$STATUS" -eq 0 ] && [ "$FOUND" = "$VERSION" ]; then
+            echo "::notice::npm already has mcp-listen@${VERSION}. Skipping npm publish."
+          elif [ "$STATUS" -ne 0 ] && grep -qx 'npm error code E404' "${CHECK_DIR}/stderr"; then
+            echo "npm does not have mcp-listen@${VERSION} (404). Publishing."
+            npm publish --access public
+          else
+            cat "${CHECK_DIR}/stderr"
+            echo "ERROR: no clear answer from npm for mcp-listen@${VERSION} (npm view exit ${STATUS}, output '${FOUND}')."
+            echo "Nothing was published."
+            exit 1
+          fi
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
+        # gh release create fails when the tag already has a release, so the
+        # step first asks GitHub for it. An existing release is kept exactly
+        # as it is, because its notes may have been edited by hand. Only
+        # "found" or "release not found" count as answers. Any other error
+        # from the check fails the step.
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          TAG="${{ github.ref_name }}"
+          CHECK_ERR=$(mktemp)
+          if gh release view "$TAG" --json tagName > /dev/null 2> "$CHECK_ERR"; then
+            echo "::notice::GitHub Release ${TAG} already exists. Keeping it unchanged."
+          elif grep -qx 'release not found' "$CHECK_ERR"; then
+            echo "GitHub has no release for ${TAG}. Creating it."
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes
+          else
+            cat "$CHECK_ERR"
+            echo "ERROR: could not check GitHub for a release of ${TAG}."
+            exit 1
+          fi
 
       - name: Verify npm publish
         if: github.event_name == 'push'
+        # npm can take minutes to show a new version after the publish. This
+        # step polls until npm shows it, with a longer gap before each new
+        # attempt, and fails if npm does not show it within about five
+        # minutes. The MCP registry publish below checks that the npm package
+        # exists, so it must not start before this step passes. A 404 means
+        # "not yet". Any other error fails the step at once. Each attempt
+        # uses a new, empty npm cache, for the reason given at the publish
+        # step.
+        #
         # Strip the `v` prefix from the tag so the `npm view` lookup uses
         # the registry-side semver, not the literal tag name.
         shell: bash
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          echo "Verifying npm registry view for mcp-listen@${VERSION}"
-          sleep 30
-          npm view "mcp-listen@${VERSION}"
+          echo "Waiting for npm to show mcp-listen@${VERSION}"
+          START=$(date +%s)
+          ATTEMPT=0
+          for GAP in 0 10 20 30 40 50 60 90; do
+            if [ "$GAP" -gt 0 ]; then
+              echo "Next attempt in ${GAP}s."
+              sleep "$GAP"
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            CHECK_DIR=$(mktemp -d)
+            if FOUND=$(npm view "mcp-listen@${VERSION}" version --prefer-online \
+                --cache "${CHECK_DIR}/cache" 2> "${CHECK_DIR}/stderr"); then
+              STATUS=0
+            else
+              STATUS=$?
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$STATUS" -eq 0 ] && [ "$FOUND" = "$VERSION" ]; then
+              echo "npm shows mcp-listen@${VERSION} after ${ELAPSED}s (attempt ${ATTEMPT})."
+              exit 0
+            elif [ "$STATUS" -ne 0 ] && grep -qx 'npm error code E404' "${CHECK_DIR}/stderr"; then
+              echo "Attempt ${ATTEMPT} at ${ELAPSED}s: npm does not show mcp-listen@${VERSION} yet (404)."
+            else
+              cat "${CHECK_DIR}/stderr"
+              echo "ERROR: attempt ${ATTEMPT} at ${ELAPSED}s got no clear answer from npm for mcp-listen@${VERSION} (npm view exit ${STATUS}, output '${FOUND}')."
+              exit 1
+            fi
+          done
+          echo "ERROR: npm did not show mcp-listen@${VERSION} within ${ELAPSED}s (${ATTEMPT} attempts)."
+          exit 1
 
       # The MCP registry entry (io.github.decibri/mcp-listen, from
       # server.json) is published from this same job, after the npm publish,
@@ -389,4 +474,40 @@ jobs:
         # Publishes server.json from the repo root. Preflight has already
         # asserted that both of its version fields match the tag, so the
         # entry cannot advertise a version that does not exist on npm.
-        run: ./mcp-publisher publish
+        #
+        # The registry refuses a second publish of the same version (HTTP
+        # 400, "cannot publish duplicate version"). So the step first reads
+        # this exact name and version from the registry's public API, and
+        # skips the publish when the registry already has it. The check sets
+        # include_deleted=true because a version marked deleted still counts
+        # as a duplicate. Only HTTP 200 with this name and version, or HTTP
+        # 404, count as answers. Any other result fails the step, so an
+        # unreachable registry is never read as "already published".
+        shell: bash
+        run: |
+          NAME=$(node -p "require('./server.json').name")
+          VERSION=$(node -p "require('./server.json').version")
+          # The slash in the server name must be URL-encoded in the path.
+          URL="https://registry.modelcontextprotocol.io/v0.1/servers/${NAME/\//%2F}/versions/${VERSION}?include_deleted=true"
+          BODY=$(mktemp)
+          if ! CODE=$(curl -sS --max-time 60 -o "$BODY" -w '%{http_code}' "$URL"); then
+            echo "ERROR: could not reach the MCP registry to check ${NAME} version ${VERSION}."
+            echo "Nothing was published."
+            exit 1
+          fi
+          if [ "$CODE" = "200" ] && node -e '
+              const [file, name, version] = process.argv.slice(1);
+              const { server } = JSON.parse(require("fs").readFileSync(file, "utf8"));
+              process.exit(server && server.name === name && server.version === version ? 0 : 1);
+            ' "$BODY" "$NAME" "$VERSION"; then
+            echo "::notice::The MCP registry already has ${NAME} version ${VERSION}. Skipping the registry publish."
+          elif [ "$CODE" = "404" ]; then
+            echo "The MCP registry does not have ${NAME} version ${VERSION} (404). Publishing."
+            ./mcp-publisher publish
+          else
+            cat "$BODY"
+            echo ""
+            echo "ERROR: unexpected answer from the MCP registry for ${NAME} version ${VERSION} (HTTP ${CODE})."
+            echo "Nothing was published."
+            exit 1
+          fi
