@@ -184,9 +184,9 @@ Full voice pipeline: capture audio, transcribe it on this machine with whisper.c
 
 | Outcome | `isError` | `speech_detected` | `transcription` | `response` |
 | --- | --- | --- | --- | --- |
-| Normal | absent | (`true`/omitted) | the text | the answer |
+| Normal | absent | absent | the text | the answer |
 | No speech at all | absent | `false` | `null` | `null` |
-| Speech, but no transcribable words | absent | `true` | `null` | `null` |
+| Speech, but no transcribable words | absent | `true` (absent with `stop_on_silence: false`) | `null` | `null` |
 | Transcription step failed | `true` | absent | absent | absent |
 | Ollama unavailable, errored, or empty | `true` | absent | absent (the text if the reply is empty) | absent (`null` if the reply is empty) |
 
