@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-13
+
+### Changed
+
+- The minimum version of `@modelcontextprotocol/sdk` is 1.31.0. All published security advisories for the SDK are for versions before 1.31.0.
+- The minimum version of `decibri` is 5.8.0. The CI tests use this version.
+- The `voice_query` outcomes table in the README shows that a normal result does not contain `speech_detected`. It also shows that, when `stop_on_silence` is `false`, a result for speech without transcribable words does not contain `speech_detected`.
+
 ## [0.7.1] - 2026-10-07
 
 ### Changed
@@ -347,7 +355,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing, WAV output validation, and error responses.
 - Tag-triggered npm publish workflow.
 
-[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/decibri/mcp-listen/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/decibri/mcp-listen/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/decibri/mcp-listen/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/decibri/mcp-listen/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/decibri/mcp-listen/compare/v0.5.0...v0.6.0

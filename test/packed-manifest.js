@@ -91,7 +91,8 @@ try {
 
   // tar ships with every platform this package supports (bsdtar on
   // Windows 10+, GNU/BSD tar on Linux and macOS).
-  const extract = spawnSync('tar', ['-xzf', path.join(workDir, tarball), '-C', workDir], { encoding: 'utf8' });
+  // tar gets no drive path in its arguments, because some Windows tar builds cannot open one. It runs in workDir instead.
+  const extract = spawnSync('tar', ['-xzf', tarball], { cwd: workDir, encoding: 'utf8' });
   assert.strictEqual(extract.status, 0, `tar extraction failed: ${extract.stderr}`);
   const packedDir = path.join(workDir, 'package');
 

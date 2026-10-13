@@ -1,6 +1,6 @@
 {
   "name": "mcp-listen",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Give your AI agents the ability to listen. Microphone capture and speech-to-text tools for MCP-compatible agents.",
   "mcpName": "io.github.decibri/mcp-listen",
   "main": "index.js",
@@ -43,8 +43,8 @@
     "url": "https://github.com/decibri/mcp-listen/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "decibri": "^5.0.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "decibri": "^5.8.0"
   },
   "optionalDependencies": {
     "@kutalia/whisper-node-addon": "^1.0.1",
